@@ -35,40 +35,53 @@ st.set_page_config(
 
 # ─────────────────────────────────────────────────────────────
 # THEME SYSTEM
+# Three modern looks. Porcelain is pure Apple light mode.
 # ─────────────────────────────────────────────────────────────
 THEMES = {
-    "Classic Dark": {
-        "header_grad": "linear-gradient(135deg, #d4a5ff 0%, #f0c6ff 100%)",
-        "app_bg": "#0e1117",
-        "sidebar_bg": "#161b22",
-        "text": "#e6e6e6",
-        "accent": "#8b5cf6",
-        "card_bg": "rgba(139,92,246,0.12)",
-        "card_border": "rgba(139,92,246,0.25)",
-        "plotly": "plotly_dark",
-        "mpl": "dark_background",
-        "map_style": "carto-darkmatter",
-    },
-    "Light Minimal": {
-        "header_grad": "linear-gradient(135deg, #1a5276 0%, #2e86c1 100%)",
-        "app_bg": "#ffffff",
-        "sidebar_bg": "#f7f8fa",
-        "text": "#1a1a2e",
-        "accent": "#1a5276",
-        "card_bg": "rgba(26,82,118,0.06)",
-        "card_border": "rgba(26,82,118,0.15)",
+    # Apple light. System white, SF blue, crisp and quiet.
+    "Porcelain": {
+        "header_grad": "linear-gradient(135deg, #1D1D1F 0%, #0071E3 100%)",
+        "app_bg": "#FBFBFD",
+        "sidebar_bg": "#F5F5F7",
+        "text": "#1D1D1F",
+        "muted": "#6E6E73",
+        "accent": "#0071E3",
+        "accent_soft": "#5AC8FA",
+        "card_bg": "rgba(255,255,255,0.72)",
+        "card_border": "rgba(0,0,0,0.08)",
+        "shadow": "0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)",
         "plotly": "plotly_white",
         "mpl": "seaborn-v0_8-whitegrid",
         "map_style": "carto-positron",
     },
-    "Warm Tone": {
-        "header_grad": "linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)",
-        "app_bg": "#1a1a1a",
-        "sidebar_bg": "#111111",
-        "text": "#e8e8e8",
-        "accent": "#e74c3c",
-        "card_bg": "rgba(231,76,60,0.10)",
-        "card_border": "rgba(231,76,60,0.25)",
+    # Apple dark. Deep black, electric blue into purple.
+    "Graphite": {
+        "header_grad": "linear-gradient(135deg, #0A84FF 0%, #BF5AF2 100%)",
+        "app_bg": "#000000",
+        "sidebar_bg": "#1C1C1E",
+        "text": "#F5F5F7",
+        "muted": "#8E8E93",
+        "accent": "#0A84FF",
+        "accent_soft": "#BF5AF2",
+        "card_bg": "rgba(28,28,30,0.72)",
+        "card_border": "rgba(255,255,255,0.10)",
+        "shadow": "0 1px 2px rgba(0,0,0,0.4), 0 12px 32px rgba(0,0,0,0.5)",
+        "plotly": "plotly_dark",
+        "mpl": "dark_background",
+        "map_style": "carto-darkmatter",
+    },
+    # Linear.app vibe. Midnight navy + cyan into violet.
+    "Aurora": {
+        "header_grad": "linear-gradient(135deg, #06B6D4 0%, #8B5CF6 100%)",
+        "app_bg": "#0B0F1A",
+        "sidebar_bg": "#111827",
+        "text": "#E5E7EB",
+        "muted": "#9CA3AF",
+        "accent": "#06B6D4",
+        "accent_soft": "#8B5CF6",
+        "card_bg": "rgba(17,24,39,0.68)",
+        "card_border": "rgba(6,182,212,0.18)",
+        "shadow": "0 1px 2px rgba(0,0,0,0.4), 0 12px 40px rgba(6,182,212,0.08)",
         "plotly": "plotly_dark",
         "mpl": "dark_background",
         "map_style": "carto-darkmatter",
@@ -77,7 +90,7 @@ THEMES = {
 
 # Sidebar
 st.sidebar.markdown("### Manhattan Heritage Valuation")
-theme_name = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=1)
+theme_name = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=0)
 T = THEMES[theme_name]
 
 try:
@@ -89,40 +102,81 @@ st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "Navigation",
     [
-        "1 — Business Case & Data",
-        "2 — Visualizations & Maps",
-        "3 — Prediction Models",
-        "4 — Feature Importance",
-        "5 — Hyperparameter Tuning",
+        "1. Business Case & Data",
+        "2. Visualizations & Maps",
+        "3. Prediction Models",
+        "4. Feature Importance",
+        "5. Hyperparameter Tuning",
     ],
 )
 
-# Inject CSS
+# Inject CSS. Inter font + glassy cards + tight vertical rhythm.
 st.markdown(f"""
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+  html, body, [class*="css"] {{
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
+  }}
+
   [data-testid="stAppViewContainer"] {{background: {T["app_bg"]} !important;}}
   [data-testid="stSidebar"] {{background: {T["sidebar_bg"]} !important;}}
-  .stMarkdown p, .stMarkdown li {{color: {T["text"]} !important;}}
-  h1,h2,h3,h4 {{color: {T["text"]} !important;}}
+  [data-testid="stSidebar"] * {{color: {T["text"]} !important;}}
+  .stMarkdown p, .stMarkdown li, .stMarkdown span {{color: {T["text"]} !important;}}
+  h1, h2, h3, h4, h5 {{color: {T["text"]} !important; letter-spacing: -0.02em; font-weight: 700;}}
 
+  /* Gradient page title */
   .page-title {{
-    font-size: 2.4rem; font-weight: 800;
+    font-size: 2.6rem; font-weight: 800; line-height: 1.1;
     background: {T["header_grad"]};
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 0.1rem;
+    background-clip: text;
+    margin-bottom: 0.25rem; letter-spacing: -0.03em;
   }}
   .page-subtitle {{
-    font-size: 1.05rem; color: {T["text"]}; opacity: 0.65;
-    margin-bottom: 1.5rem; font-weight: 300;
+    font-size: 1.02rem; color: {T["muted"]};
+    margin-bottom: 1.6rem; font-weight: 400; max-width: 52rem;
   }}
+
+  /* Glassy KPI card */
   .card {{
     background: {T["card_bg"]};
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border: 1px solid {T["card_border"]};
-    border-radius: 10px; padding: 1.2rem;
-    margin-bottom: 0.8rem;
+    border-radius: 14px; padding: 1.1rem 1.2rem;
+    box-shadow: {T["shadow"]};
+    transition: transform .18s ease, box-shadow .18s ease;
   }}
-  .card .val {{font-size: 1.6rem; font-weight: 700; margin: 0; color: {T["text"]};}}
-  .card .lbl {{font-size: 0.8rem; opacity: 0.6; margin: 0; color: {T["text"]};}}
+  .card:hover {{ transform: translateY(-2px); }}
+  .card .val {{font-size: 1.65rem; font-weight: 700; margin: 0; color: {T["text"]}; letter-spacing: -0.02em;}}
+  .card .lbl {{font-size: 0.78rem; color: {T["muted"]}; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;}}
+
+  /* Buttons feel like Apple */
+  .stButton > button {{
+    background: {T["accent"]} !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    padding: 0.5rem 1.1rem !important;
+    transition: all .15s ease;
+  }}
+  .stButton > button:hover {{
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+  }}
+
+  /* Tighten dataframes */
+  [data-testid="stDataFrame"] {{border-radius: 12px; overflow: hidden;}}
+
+  /* Radio chips */
+  div[role="radiogroup"] > label {{
+    border-radius: 999px !important;
+    padding: 0.3rem 0.9rem !important;
+  }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -135,7 +189,7 @@ def load_data():
     d = pd.read_csv("Manhattan_Heritage_Analysis.csv", low_memory=False)
     d["sale_date"] = pd.to_datetime(d["sale_date"], errors="coerce")
 
-    # Clean "0" placeholders in text columns — these are not real values
+    # Strip "0" placeholders from text cols (not real values)
     zero_cols = ["building_name", "landmark_orig", "landmark_new",
                  "style_secondary", "material_secondary"]
     for col in zero_cols:
@@ -220,7 +274,7 @@ def train_eval(model, Xtr, ytr, Xte, yte):
 
 
 # =================================================================
-# PAGE 1 — BUSINESS CASE & DATA
+# PAGE 1. BUSINESS CASE & DATA
 # =================================================================
 def page1():
     title("Manhattan Heritage Valuation",
@@ -231,13 +285,13 @@ def page1():
     # ── Problem framing ──
     st.markdown("### The Research Question")
     st.markdown("""
-Most real-estate pricing models rely on **structural features** — square footage,
-lot size, number of floors, zoning, and assessment values. These are important,
+Most real estate pricing models rely on **structural features** like square footage,
+lot size, number of floors, zoning, and assessment values. These matter,
 but they ignore *why certain buildings in Manhattan command extraordinary premiums*.
 
-**Our approach:** We add a second layer of **architectural and preservation features**
-— construction era, architect prestige, facade material, architectural style, landmark
-status, and historic district membership — to see if these create a measurable
+**Our approach.** We add a second layer of **architectural and preservation features**
+(construction era, architect prestige, facade material, architectural style, landmark
+status, historic district membership) to see if these create a measurable
 **"preservation premium"** in sale prices.
     """)
 
@@ -316,7 +370,7 @@ After filtering out \\$0 non-market transactions:
 
 
 # =================================================================
-# PAGE 2 — VISUALIZATIONS & MAPS
+# PAGE 2. VISUALIZATIONS & MAPS
 # =================================================================
 def page2():
     title("Visualizations & Maps",
@@ -530,7 +584,7 @@ def page2():
 
 
 # =================================================================
-# PAGE 3 — PREDICTION MODELS
+# PAGE 3. PREDICTION MODELS
 # =================================================================
 def page3():
     title("Prediction Models",
@@ -642,7 +696,7 @@ def page3():
 
     best = up.loc[up["Heritage R²"].idxmax()]
     st.success(
-        f"Best Heritage Model: **{best['Model']}** — "
+        f"Best Heritage Model: **{best['Model']}**. "
         f"R² = {best['Heritage R²']:.4f}  "
         f"(+{best['Uplift']:.4f} over baseline)"
     )
@@ -661,11 +715,11 @@ def page3():
 
 
 # =================================================================
-# PAGE 4 — FEATURE IMPORTANCE
+# PAGE 4. FEATURE IMPORTANCE
 # =================================================================
 def page4():
     title("Feature Importance & Explainability",
-          "Which features drive the Heritage model — baseline structural or preservation characteristics?")
+          "Which features drive the Heritage model: baseline structural or preservation characteristics?")
 
     if "trained_h" not in st.session_state:
         st.info("Please train models on the **Prediction Models** page first, then return here.")
@@ -760,7 +814,7 @@ def page4():
 
 
 # =================================================================
-# PAGE 5 — HYPERPARAMETER TUNING
+# PAGE 5. HYPERPARAMETER TUNING
 # =================================================================
 def page5():
     title("Hyperparameter Tuning",
@@ -841,7 +895,7 @@ def page5():
                 import wandb
                 wb_ok = True
             except ImportError:
-                st.warning("wandb not installed — logging locally only.")
+                st.warning("wandb not installed. Logging locally only.")
 
         results = []
         prog = st.progress(0)
@@ -890,7 +944,7 @@ def page5():
         pcols = [c for c in res_df.columns if c not in ["r2_train", "r2_test", "mae", "rmse"]]
         st.success(
             f"Best: R² = {best['r2_test']:.4f}, MAE = {best['mae']:.4f}, "
-            f"RMSE = {best['rmse']:.4f} — Params: {dict(best[pcols])}"
+            f"RMSE = {best['rmse']:.4f}. Params: {dict(best[pcols])}"
         )
 
         # Charts
