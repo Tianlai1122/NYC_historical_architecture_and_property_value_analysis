@@ -225,14 +225,33 @@ st.sidebar.caption(
 # FEATURE SETS
 # ─────────────────────────────────────────────────────────────
 BASELINE = [
+    # Size & shape
     "gross_sqft", "land_sqft", "num_floors", "lot_area", "lot_depth",
     "lot_frontage", "building_depth", "building_frontage",
-    "assess_total", "assess_land", "built_far", "resid_far",
+    # Unit mix (residential / commercial)
+    "residential_units", "commercial_units", "total_units",
+    # Tax & assessment
+    "assess_total", "assess_land", "exempt_total",
+    # Zoning (FAR family)
+    "built_far", "resid_far", "comm_far", "facil_far",
+    # Encoded categoricals (zoning + building class)
+    "zoning_encoded", "building_class_code_encoded",
+    # When it sold (month-of-year seasonality; year is all 2025 so dropped)
+    "sale_month",
 ]
 HERITAGE = [
-    "building_age", "architect_prestige_score", "rare_style_score",
-    "is_landmark", "in_historic_district", "is_altered",
-    "construction_era_encoded", "material_primary_encoded", "style_primary_encoded",
+    # Age & era
+    "building_age", "construction_era_encoded",
+    # Architect signal (prestige score + raw portfolio count)
+    "architect_prestige_score", "architect_building_count",
+    # Style rarity (rare score + raw frequency)
+    "rare_style_score", "style_frequency",
+    # Protection status
+    "is_landmark", "in_historic_district",
+    # Alteration history
+    "is_altered", "years_since_alteration",
+    # Facade + style
+    "material_primary_encoded", "style_primary_encoded",
 ]
 
 @st.cache_data
@@ -240,14 +259,27 @@ def prepare_features(dataframe):
     # Filter non-market transactions (donations, estate transfers, internal transfers)
     d = dataframe[dataframe["sale_price"] >= 100_000].copy()
     d["log_price"] = np.log1p(d["sale_price"])
-    for cat in ["construction_era", "material_primary", "style_primary"]:
+
+    # Label-encode string categoricals we want in the model
+    cat_cols = [
+        "construction_era", "material_primary", "style_primary",
+        "zoning", "building_class_code",
+    ]
+    for cat in cat_cols:
         if cat in d.columns:
             le = LabelEncoder()
             d[f"{cat}_encoded"] = le.fit_transform(d[cat].fillna("Unknown").astype(str))
+
+    # Unit columns: missing usually means "none recorded", so impute zero not median
+    for c in ["residential_units", "commercial_units", "total_units"]:
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0)
+
     all_f = BASELINE + HERITAGE
     avail = [f for f in all_f if f in d.columns]
     d[avail] = d[avail].apply(pd.to_numeric, errors="coerce")
-    d = d.dropna(subset=avail, thresh=len(avail) - 4)
+    # Loose dropna: allow up to ~1/3 of features to be missing before we drop the row
+    d = d.dropna(subset=avail, thresh=len(avail) - 6)
     for c in avail:
         d[c] = d[c].fillna(d[c].median())
     return d, [f for f in BASELINE if f in avail], [f for f in HERITAGE if f in avail]
