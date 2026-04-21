@@ -296,6 +296,60 @@ FALL = FB + FH
 
 
 # ─────────────────────────────────────────────────────────────
+# FRIENDLY LABELS
+# Plain-English names for raw column names. Dropdowns/charts use these.
+# ─────────────────────────────────────────────────────────────
+FRIENDLY_LABELS = {
+    # Structural / size
+    "gross_sqft": "Gross Floor Area",
+    "land_sqft": "Lot Size",
+    "num_floors": "Number of Floors",
+    "lot_area": "Lot Area",
+    "lot_depth": "Lot Depth",
+    "lot_frontage": "Lot Frontage",
+    "building_depth": "Building Depth",
+    "building_frontage": "Building Frontage",
+    # Units
+    "residential_units": "Residential Units",
+    "commercial_units": "Commercial Units",
+    "total_units": "Total Units",
+    # Tax
+    "assess_total": "Total Assessment Value",
+    "assess_land": "Land Assessment Value",
+    "exempt_total": "Tax Exemption Amount",
+    # Zoning
+    "built_far": "Built FAR",
+    "resid_far": "Residential FAR Cap",
+    "comm_far": "Commercial FAR Cap",
+    "facil_far": "Facility FAR Cap",
+    "zoning_encoded": "Zoning District",
+    "building_class_code_encoded": "Building Class",
+    # Time
+    "sale_month": "Sale Month",
+    "sale_price": "Sale Price",
+    "price_per_sqft": "Price per Sqft",
+    # Heritage
+    "building_age": "Building Age",
+    "construction_era_encoded": "Construction Era",
+    "architect_prestige_score": "Architect Prestige Score",
+    "architect_building_count": "Architect Portfolio Size",
+    "rare_style_score": "Rare Style Score",
+    "style_frequency": "Style Frequency",
+    "is_landmark": "Individual Landmark",
+    "in_historic_district": "In Historic District",
+    "is_altered": "Has Been Altered",
+    "years_since_alteration": "Years Since Alteration",
+    "material_primary_encoded": "Primary Facade Material",
+    "style_primary_encoded": "Primary Architectural Style",
+}
+
+def flabel(var: str) -> str:
+    """Return 'Plain English (raw_name)' for a variable, or just the raw name."""
+    pretty = FRIENDLY_LABELS.get(var)
+    return f"{pretty} ({var})" if pretty else var
+
+
+# ─────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────
 def title(text, sub=""):
@@ -489,11 +543,11 @@ def page2():
             color_var = st.selectbox("Color by", [
                 "sale_price", "price_per_sqft", "building_age",
                 "architect_prestige_score", "num_floors", "assess_total",
-            ])
+            ], format_func=flabel)
         with c2:
             height_var = st.selectbox("Height by", [
                 "sale_price", "gross_sqft", "num_floors", "building_age", "price_per_sqft",
-            ])
+            ], format_func=flabel)
         with c3:
             cmap_name = st.selectbox("Palette", ["plasma", "viridis", "magma", "cividis", "turbo"])
 
@@ -903,9 +957,12 @@ def page4():
             st.warning("This model does not expose importance values.")
             return
 
-        fi = pd.DataFrame({"Feature": fnames, "Importance": imp})
-        fi["Type"] = fi["Feature"].apply(lambda f: "Baseline" if f in FB else "Heritage")
-        fi = fi.sort_values("Importance", ascending=True)
+        # Use friendly names in the chart so non-technical reader gets it instantly
+        fi = pd.DataFrame({
+            "Feature": [flabel(f) for f in fnames],
+            "Importance": imp,
+            "Type": ["Baseline" if f in FB else "Heritage" for f in fnames],
+        }).sort_values("Importance", ascending=True)
 
         fig = px.bar(fi, x="Importance", y="Feature", orientation="h",
                      color="Type",
@@ -922,7 +979,8 @@ def page4():
             st.markdown("---")
             st.markdown("### Coefficient Direction")
             coef = pd.DataFrame({
-                "Feature": fnames, "Coefficient": model.coef_,
+                "Feature": [flabel(f) for f in fnames],
+                "Coefficient": model.coef_,
                 "Type": ["Baseline" if f in FB else "Heritage" for f in fnames],
             }).sort_values("Coefficient", key=abs, ascending=True)
             fig = px.bar(coef, x="Coefficient", y="Feature", orientation="h",
@@ -945,7 +1003,7 @@ def page4():
 
             st.markdown("### SHAP Summary Plot")
             fig_s, ax = plt.subplots(figsize=(11, 7))
-            shap.summary_plot(sv, Xa_te[:250], feature_names=fnames, show=False, max_display=15)
+            shap.summary_plot(sv, Xa_te[:250], feature_names=[flabel(f) for f in fnames], show=False, max_display=15)
             st.pyplot(fig_s)
             plt.close()
 
@@ -960,7 +1018,7 @@ def page4():
             if isinstance(ev, (list, np.ndarray)):
                 ev = ev[0]
             explanation = shap.Explanation(values=sv[idx], base_values=ev,
-                                           data=Xa_te[idx], feature_names=fnames)
+                                           data=Xa_te[idx], feature_names=[flabel(f) for f in fnames])
             shap.waterfall_plot(explanation, show=False, max_display=12)
             st.pyplot(fig_w)
             plt.close()
@@ -1492,7 +1550,7 @@ def page6():
             values=np.asarray(sv[0]),
             base_values=float(ev),
             data=x_all[0],
-            feature_names=FALL,
+            feature_names=[flabel(f) for f in FALL],
         )
 
         fig_w, _ = plt.subplots(figsize=(11, 6))
