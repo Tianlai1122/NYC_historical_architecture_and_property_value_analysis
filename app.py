@@ -9,6 +9,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import copy
+import time
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
@@ -888,10 +889,11 @@ def page3():
             False,
         )
     if HAS_CATBOOST:
-        # CatBoost with quiet logging; small dataset so keep it light
+        # CatBoost: trim iterations + parallelize for snappy training
         MODELS["CatBoost"] = (
-            CatBoostRegressor(iterations=500, depth=6, learning_rate=0.05,
-                              random_seed=rs, verbose=0, allow_writing_files=False),
+            CatBoostRegressor(iterations=300, depth=6, learning_rate=0.08,
+                              random_seed=rs, verbose=0, allow_writing_files=False,
+                              thread_count=-1),
             False,
         )
 
@@ -914,22 +916,45 @@ def page3():
 
     base_rows, herit_rows = [], []
     trained_h = {}
+    timings = {}
 
-    with st.spinner("Training models..."):
-        for nm in sel:
-            proto, needs_scale = MODELS[nm]
-            mb = copy.deepcopy(proto)
-            mh = copy.deepcopy(proto)
-            if needs_scale:
-                rb = train_eval(mb, Xb_tr_s, y_tr, Xb_te_s, y_te)
-                rh = train_eval(mh, Xa_tr_s, y_tr, Xa_te_s, y_te)
-            else:
-                rb = train_eval(mb, Xb_tr, y_tr, Xb_te, y_te)
-                rh = train_eval(mh, Xa_tr, y_tr, Xa_te, y_te)
-            base_rows.append({"Model": nm, **{k: v for k, v in rb.items() if k != "preds" and k != "model"}})
-            herit_rows.append({"Model": nm, **{k: v for k, v in rh.items() if k != "preds" and k != "model"}})
-            herit_rows[-1]["preds"] = rh["preds"]
-            trained_h[nm] = mh
+    # Live progress: bar + per-model status line so user sees what's happening
+    progress = st.progress(0, text="Starting…")
+    status = st.empty()
+    total_t0 = time.perf_counter()
+
+    for i, nm in enumerate(sel, start=1):
+        status.markdown(
+            f"&nbsp;&nbsp;**Training {i}/{len(sel)}: {nm}**"
+            f" &middot; <span style='color:#6E6E73'>baseline + heritage</span>",
+            unsafe_allow_html=True,
+        )
+        t0 = time.perf_counter()
+
+        proto, needs_scale = MODELS[nm]
+        mb = copy.deepcopy(proto)
+        mh = copy.deepcopy(proto)
+        if needs_scale:
+            rb = train_eval(mb, Xb_tr_s, y_tr, Xb_te_s, y_te)
+            rh = train_eval(mh, Xa_tr_s, y_tr, Xa_te_s, y_te)
+        else:
+            rb = train_eval(mb, Xb_tr, y_tr, Xb_te, y_te)
+            rh = train_eval(mh, Xa_tr, y_tr, Xa_te, y_te)
+
+        elapsed = time.perf_counter() - t0
+        timings[nm] = elapsed
+
+        base_rows.append({"Model": nm, **{k: v for k, v in rb.items() if k not in ("preds", "model")}, "Time(s)": round(elapsed, 2)})
+        herit_rows.append({"Model": nm, **{k: v for k, v in rh.items() if k not in ("preds", "model")}, "Time(s)": round(elapsed, 2)})
+        herit_rows[-1]["preds"] = rh["preds"]
+        trained_h[nm] = mh
+
+        progress.progress(i / len(sel), text=f"Done {i}/{len(sel)} &middot; {nm} took {elapsed:.1f}s")
+
+    total_elapsed = time.perf_counter() - total_t0
+    progress.empty()
+    status.success(f"Trained {len(sel)} model{'s' if len(sel)>1 else ''} in {total_elapsed:.1f}s "
+                   f"(slowest: {max(timings, key=timings.get)} at {max(timings.values()):.1f}s)")
 
     dfb = pd.DataFrame(base_rows).set_index("Model")
     dfh = pd.DataFrame(herit_rows).set_index("Model")
@@ -945,7 +970,7 @@ def page3():
     st.markdown("---")
     st.markdown("### Results: Baseline vs Heritage")
     c1, c2 = st.columns(2)
-    fmt_cols = ["R2_train", "R2_test", "MAE", "RMSE"]
+    fmt_cols = ["R2_train", "R2_test", "MAE", "RMSE", "Time(s)"]
     with c1:
         st.markdown("**Baseline (structural only)**")
         st.dataframe(dfb[fmt_cols].round(4), use_container_width=True)
