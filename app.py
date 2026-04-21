@@ -996,16 +996,28 @@ def page5():
 
     st.caption(f"Total experiments: **{len(grid)}**")
 
-    # W&B
+    # ── W&B setup ──
     st.markdown("---")
     st.markdown("### Weights & Biases (Optional)")
     use_wb = st.checkbox("Log experiments to W&B", False)
-    wb_proj = "manhattan-heritage-tuning"
+    wb_proj = "manhattan-heritage-pricing"
+    wb_entity = ""
+    wb_key = ""
     if use_wb:
-        wb_proj = st.text_input("W&B Project Name", "manhattan-heritage-tuning")
+        wc1, wc2 = st.columns(2)
+        with wc1:
+            wb_proj = st.text_input("Project name", "manhattan-heritage-pricing")
+        with wc2:
+            wb_entity = st.text_input("Entity / team (optional)", "",
+                                      placeholder="e.g. mumu031122-new-york-university")
+        wb_key = st.text_input(
+            "API key (only if `wandb login` is not set up)", "",
+            type="password",
+            help="Leave empty if you already ran `wandb login` in your terminal. Otherwise paste from wandb.ai/authorize.",
+        )
         st.caption(
-            "**Setup:** `pip install wandb` → `wandb login` (get API key from wandb.ai/settings) "
-            "→ tick the checkbox above. Your runs will appear on your W&B dashboard."
+            "If you already ran `wandb login` in your terminal, leave the key empty. "
+            "Pasting here just runs `wandb.login(key=...)` once for this session."
         )
 
     st.markdown("---")
@@ -1020,16 +1032,43 @@ def page5():
         Xte_s = sc.transform(Xte)
         needs_scale = model_name in ["Ridge Regression", "Lasso Regression", "Elastic Net"]
 
+        # Try to set up W&B once before the loop, not inside it
         wb_ok = False
+        wandb_mod = None
         if use_wb:
             try:
-                import wandb
-                wb_ok = True
+                import wandb as wandb_mod
+                if wb_key.strip():
+                    wandb_mod.login(key=wb_key.strip(), relogin=True)
+                # Probe: does this session have credentials?
+                api_key_present = bool(wandb_mod.api.api_key)
+                if not api_key_present:
+                    st.error("W&B has no API key in this session. Run `wandb login` in your terminal, "
+                             "or paste your key in the field above.")
+                else:
+                    wb_ok = True
             except ImportError:
                 st.warning("wandb not installed. Logging locally only.")
+            except Exception as e:
+                st.error(f"W&B login failed: {e}")
+
+        # Short tag for run names: model + first param values
+        def short_tag(p):
+            bits = []
+            for k, v in p.items():
+                if v is None: v = "auto"
+                if isinstance(v, float):
+                    bits.append(f"{k[:3]}{v:g}")
+                else:
+                    bits.append(f"{k[:3]}{v}")
+            return "_".join(bits)
+
+        ts = pd.Timestamp.utcnow().strftime("%m%d-%H%M")
+        model_slug = model_name.lower().replace(" ", "")
 
         results = []
         prog = st.progress(0)
+        wb_errors = 0
         for i, params in enumerate(grid):
             prog.progress((i + 1) / len(grid))
 
@@ -1055,12 +1094,24 @@ def page5():
             results.append({**params, **metrics})
 
             if wb_ok:
-                import wandb
-                wandb.init(project=wb_proj, name=f"{model_name}_{i}",
-                           config={"model": model_name, "test_size": test_sz, **params},
-                           reinit=True)
-                wandb.log(metrics)
-                wandb.finish()
+                try:
+                    init_kwargs = dict(
+                        project=wb_proj,
+                        name=f"{model_slug}_{short_tag(params)}_{ts}",
+                        group=model_name,
+                        tags=[model_slug, "heritage-features", "log-target"],
+                        config={"model": model_name, "test_size": test_sz, **params},
+                        reinit=True,
+                    )
+                    if wb_entity.strip():
+                        init_kwargs["entity"] = wb_entity.strip()
+                    run = wandb_mod.init(**init_kwargs)
+                    run.log(metrics)
+                    run.finish()
+                except Exception as e:
+                    wb_errors += 1
+                    if wb_errors <= 2:  # only show first 2 errors so we don't spam
+                        st.warning(f"W&B logging failed for run {i}: {e}")
 
         prog.empty()
         res_df = pd.DataFrame(results).sort_values("r2_test", ascending=False)
@@ -1102,7 +1153,9 @@ def page5():
         st.plotly_chart(fig2, use_container_width=True)
 
         if wb_ok and use_wb:
-            st.caption(f"View dashboard at wandb.ai → project `{wb_proj}`")
+            ent_part = f"{wb_entity.strip()}/" if wb_entity.strip() else ""
+            url = f"https://wandb.ai/{ent_part}{wb_proj}"
+            st.success(f"Logged {len(grid) - wb_errors}/{len(grid)} runs. [Open dashboard ↗]({url})")
 
 
 # =================================================================
