@@ -18,11 +18,18 @@ import pydeck as pdk
 import requests
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 import warnings
+
+# Optional: LightGBM. If missing, gracefully disable its models.
+try:
+    import lightgbm as lgb
+    HAS_LGBM = True
+except ImportError:
+    HAS_LGBM = False
 
 warnings.filterwarnings("ignore")
 
@@ -710,18 +717,30 @@ def page3():
         "Linear Regression":  (LinearRegression(), True),
         "Ridge Regression":   (Ridge(alpha=1.0), True),
         "Lasso Regression":   (Lasso(alpha=0.05), True),
+        "Elastic Net":        (ElasticNet(alpha=0.05, l1_ratio=0.5, random_state=rs), True),
         "Decision Tree":      (DecisionTreeRegressor(max_depth=10, random_state=rs), False),
         "Random Forest":      (RandomForestRegressor(n_estimators=100, max_depth=10, random_state=rs, n_jobs=-1), False),
         "Gradient Boosting":  (GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=rs), False),
     }
+    if HAS_LGBM:
+        MODELS["LightGBM"] = (
+            lgb.LGBMRegressor(n_estimators=300, num_leaves=31, learning_rate=0.05,
+                              random_state=rs, n_jobs=-1, verbose=-1),
+            False,
+        )
 
     st.markdown("---")
     st.markdown("### Select models to train")
+    # 4 per row so the checkbox list stays tidy as the list grows
     sel = []
-    cols = st.columns(6)
-    for (nm, _), col in zip(MODELS.items(), cols):
-        if col.checkbox(nm, True, key=f"m_{nm}"):
-            sel.append(nm)
+    names = list(MODELS.keys())
+    per_row = 4
+    for start in range(0, len(names), per_row):
+        row = names[start:start + per_row]
+        cols = st.columns(per_row)
+        for nm, col in zip(row, cols):
+            if col.checkbox(nm, True, key=f"m_{nm}"):
+                sel.append(nm)
 
     if not sel:
         st.warning("Select at least one model.")
@@ -917,12 +936,16 @@ def page5():
     X = mdf[FALL].values
     y = mdf["log_price"].values
 
+    tune_choices = [
+        "Ridge Regression", "Lasso Regression", "Elastic Net",
+        "Decision Tree", "Random Forest", "Gradient Boosting",
+    ]
+    if HAS_LGBM:
+        tune_choices.append("LightGBM")
+
     c1, c2 = st.columns(2)
     with c1:
-        model_name = st.selectbox("Model", [
-            "Ridge Regression", "Lasso Regression",
-            "Decision Tree", "Random Forest", "Gradient Boosting",
-        ])
+        model_name = st.selectbox("Model", tune_choices)
     with c2:
         test_sz = st.slider("Test size", 0.1, 0.4, 0.2, 0.05, key="hp_ts")
 
@@ -939,6 +962,20 @@ def page5():
         alphas = st.multiselect("Alpha", [0.0001, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
                                 default=[0.001, 0.01, 0.1, 0.5])
         grid = [{"alpha": a} for a in alphas]
+
+    elif model_name == "Elastic Net":
+        alphas = st.multiselect("Alpha", [0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
+                                default=[0.01, 0.05, 0.1])
+        l1s = st.multiselect("L1 ratio", [0.1, 0.3, 0.5, 0.7, 0.9],
+                             default=[0.3, 0.5, 0.7])
+        grid = [{"alpha": a, "l1_ratio": l} for a in alphas for l in l1s]
+
+    elif model_name == "LightGBM":
+        nes = st.multiselect("N Estimators", [100, 200, 400, 800], default=[200, 400])
+        leaves = st.multiselect("Num Leaves", [15, 31, 63, 127], default=[31, 63])
+        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1], default=[0.05, 0.1])
+        grid = [{"n_estimators": n, "num_leaves": lv, "learning_rate": lr}
+                for n in nes for lv in leaves for lr in lrs]
 
     elif model_name == "Decision Tree":
         depths = st.multiselect("Max Depth", [2, 3, 5, 7, 10, 15, None], default=[3, 5, 10])
@@ -981,7 +1018,7 @@ def page5():
         sc = StandardScaler()
         Xtr_s = sc.fit_transform(Xtr)
         Xte_s = sc.transform(Xte)
-        needs_scale = model_name in ["Ridge Regression", "Lasso Regression"]
+        needs_scale = model_name in ["Ridge Regression", "Lasso Regression", "Elastic Net"]
 
         wb_ok = False
         if use_wb:
@@ -998,9 +1035,11 @@ def page5():
 
             if model_name == "Ridge Regression":       m = Ridge(**params)
             elif model_name == "Lasso Regression":     m = Lasso(**params)
+            elif model_name == "Elastic Net":          m = ElasticNet(**params, random_state=42)
             elif model_name == "Decision Tree":        m = DecisionTreeRegressor(**params, random_state=42)
             elif model_name == "Random Forest":        m = RandomForestRegressor(**params, random_state=42, n_jobs=-1)
-            else:                                      m = GradientBoostingRegressor(**params, random_state=42)
+            elif model_name == "Gradient Boosting":    m = GradientBoostingRegressor(**params, random_state=42)
+            else:                                      m = lgb.LGBMRegressor(**params, random_state=42, n_jobs=-1, verbose=-1)
 
             if needs_scale:
                 m.fit(Xtr_s, ytr); ptr = m.predict(Xtr_s); pte = m.predict(Xte_s)
@@ -1081,6 +1120,25 @@ def get_valuation_models():
     mb = GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42).fit(Xb_tr, y_tr)
     mh = GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42).fit(Xa_tr, y_tr)
     return mb, mh, Xa_tr
+
+
+@st.cache_resource
+def get_quantile_models():
+    """Train LGBM at 10/50/90 percentiles for prediction intervals. None if lgb missing."""
+    if not HAS_LGBM:
+        return None
+    X_a = mdf[FALL].values
+    y   = mdf["log_price"].values
+    Xa_tr, _, y_tr, _ = train_test_split(X_a, y, test_size=0.2, random_state=42)
+    out = {}
+    for q in (0.1, 0.5, 0.9):
+        m = lgb.LGBMRegressor(
+            objective="quantile", alpha=q,
+            n_estimators=400, num_leaves=31, learning_rate=0.05,
+            random_state=42, n_jobs=-1, verbose=-1,
+        ).fit(Xa_tr, y_tr)
+        out[q] = m
+    return out
 
 
 def page6():
@@ -1173,6 +1231,69 @@ def page6():
         st.info(f"Sold **above** heritage model by {gap_pct:+.1f}% (${abs(gap):,.0f}). Could be unique features the model misses, or a hot market moment.")
     else:
         st.warning(f"Sold **below** heritage model by {gap_pct:+.1f}% (${abs(gap):,.0f}). Could be a distressed sale, condition issues, or a bargain.")
+
+    # ── LGBM quantile interval (80% band) ──
+    qm = get_quantile_models()
+    if qm is not None:
+        q_low  = float(np.expm1(qm[0.1].predict(x_all)[0]))
+        q_med  = float(np.expm1(qm[0.5].predict(x_all)[0]))
+        q_high = float(np.expm1(qm[0.9].predict(x_all)[0]))
+        inside = q_low <= actual <= q_high
+
+        st.markdown("---")
+        st.markdown("### Prediction interval")
+        st.caption("LightGBM quantile regression at the 10th, 50th, and 90th percentiles. The band covers where 80% of buildings with these features sell.")
+
+        # Horizontal range chart: low to high band + median dot + actual marker
+        dot_color = T["accent"]
+        actual_color = "#10b981" if inside else "#ef4444"
+
+        fig = go.Figure()
+        # The band
+        fig.add_trace(go.Scatter(
+            x=[q_low, q_high], y=[0, 0], mode="lines",
+            line=dict(color=T["accent"], width=18),
+            opacity=0.35, hoverinfo="skip", showlegend=False,
+        ))
+        # Endpoint ticks
+        fig.add_trace(go.Scatter(
+            x=[q_low, q_high], y=[0, 0], mode="markers+text",
+            marker=dict(size=10, color=T["accent"]),
+            text=[f"P10<br>${q_low:,.0f}", f"P90<br>${q_high:,.0f}"],
+            textposition=["top left", "top right"],
+            hoverinfo="skip", showlegend=False,
+        ))
+        # Median
+        fig.add_trace(go.Scatter(
+            x=[q_med], y=[0], mode="markers+text",
+            marker=dict(size=20, color=dot_color, line=dict(color="white", width=2)),
+            text=[f"Model median<br>${q_med:,.0f}"], textposition="bottom center",
+            name="Median (P50)",
+        ))
+        # Actual
+        fig.add_trace(go.Scatter(
+            x=[actual], y=[0], mode="markers+text",
+            marker=dict(size=22, color=actual_color, symbol="diamond",
+                        line=dict(color="white", width=2)),
+            text=[f"Actual<br>${actual:,.0f}"], textposition="bottom center",
+            name="Actual sale",
+        ))
+        pad = max(q_high - q_low, 1) * 0.15
+        fig.update_layout(
+            template=T["plotly"], height=230,
+            xaxis=dict(tickformat="$,.0f",
+                       range=[min(q_low, actual) - pad, max(q_high, actual) + pad]),
+            yaxis=dict(visible=False, range=[-1, 1]),
+            margin=dict(l=20, r=20, t=40, b=20), showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        if inside:
+            st.caption(f"Actual price sits inside the 80% band. Consistent with comparable buildings.")
+        elif actual > q_high:
+            st.caption(f"Actual price is above the P90 by ${actual - q_high:,.0f}. Top decile outcome.")
+        else:
+            st.caption(f"Actual price is below the P10 by ${q_low - actual:,.0f}. Bottom decile outcome.")
 
     # ── Wikipedia spotlight (best-effort) ──
     bname = str(row.get("building_name") or "").strip()
