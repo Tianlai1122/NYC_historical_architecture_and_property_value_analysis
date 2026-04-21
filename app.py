@@ -107,6 +107,7 @@ page = st.sidebar.radio(
         "3. Prediction Models",
         "4. Feature Importance",
         "5. Hyperparameter Tuning",
+        "6. Property Valuator",
     ],
 )
 
@@ -972,6 +973,207 @@ def page5():
             st.caption(f"View dashboard at wandb.ai → project `{wb_proj}`")
 
 
+# =================================================================
+# PAGE 6. PROPERTY VALUATOR
+# Pick a building, see baseline vs heritage prediction, and why.
+# =================================================================
+@st.cache_resource
+def get_valuation_models():
+    """Train baseline + heritage GBR once, keep in memory across reruns."""
+    X_b = mdf[FB].values
+    X_a = mdf[FALL].values
+    y = mdf["log_price"].values
+    Xb_tr, _, y_tr, _ = train_test_split(X_b, y, test_size=0.2, random_state=42)
+    Xa_tr, _, _, _   = train_test_split(X_a, y, test_size=0.2, random_state=42)
+    mb = GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42).fit(Xb_tr, y_tr)
+    mh = GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42).fit(Xa_tr, y_tr)
+    return mb, mh, Xa_tr
+
+
+def page6():
+    title("Property Valuator",
+          "Pick a historic building. Compare what basic structural features alone predict versus the full heritage model. Then see which features actually drove that number.")
+
+    with st.spinner("Warming up valuation models..."):
+        mb, mh, bg_ref = get_valuation_models()
+
+    pool = mdf.dropna(subset=FALL).copy()
+
+    # ── Search & filter ──
+    st.markdown("### Find a property")
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        query = st.text_input("Search address, building name, or architect", "").strip().lower()
+    with c2:
+        only_landmarks = st.checkbox("Landmarks only", False)
+    with c3:
+        in_hd = st.checkbox("Historic district only", False)
+
+    subset = pool.copy()
+    if only_landmarks:
+        subset = subset[subset["is_landmark"] == 1]
+    if in_hd:
+        subset = subset[subset["in_historic_district"] == 1]
+    if query:
+        m = (
+            subset["address"].astype(str).str.lower().str.contains(query, na=False)
+            | subset["building_name"].astype(str).str.lower().str.contains(query, na=False)
+            | subset["architect"].astype(str).str.lower().str.contains(query, na=False)
+        )
+        subset = subset[m]
+
+    subset = subset.sort_values("sale_price", ascending=False)
+
+    if len(subset) == 0:
+        st.info("No matches. Try a different search.")
+        return
+
+    st.caption(f"{len(subset):,} matching properties. Showing top 200 by price.")
+
+    def label(i):
+        r = subset.loc[i]
+        nm = r.get("display_name") or r.get("address", "Unknown")
+        arch = r["architect"] if pd.notna(r.get("architect")) else "Unknown architect"
+        return f"{nm}  ·  {arch}  ·  ${r['sale_price']:,.0f}"
+
+    pick_idx = st.selectbox("Pick a property", subset.index[:200].tolist(), format_func=label)
+    row = subset.loc[pick_idx]
+
+    # ── Predict (log space, then back to dollars) ──
+    x_base = row[FB].values.reshape(1, -1).astype(float)
+    x_all  = row[FALL].values.reshape(1, -1).astype(float)
+    pred_base = float(np.expm1(mb.predict(x_base)[0]))
+    pred_her  = float(np.expm1(mh.predict(x_all)[0]))
+    actual    = float(row["sale_price"])
+    premium = pred_her - pred_base
+    premium_pct = premium / pred_base * 100 if pred_base else 0
+    gap = actual - pred_her
+    gap_pct = gap / pred_her * 100 if pred_her else 0
+
+    # ── Hero cards ──
+    st.markdown("---")
+    good = T["accent"]
+    bad = "#ef4444"
+    premium_color = good if premium >= 0 else bad
+
+    cols = st.columns(4)
+    cols[0].markdown(
+        f'<div class="card"><p class="val">${actual:,.0f}</p>'
+        f'<p class="lbl">Actual sale price</p></div>', unsafe_allow_html=True)
+    cols[1].markdown(
+        f'<div class="card"><p class="val">${pred_base:,.0f}</p>'
+        f'<p class="lbl">Baseline prediction</p></div>', unsafe_allow_html=True)
+    cols[2].markdown(
+        f'<div class="card"><p class="val">${pred_her:,.0f}</p>'
+        f'<p class="lbl">Heritage prediction</p></div>', unsafe_allow_html=True)
+    cols[3].markdown(
+        f'<div class="card"><p class="val" style="color:{premium_color}">'
+        f'{premium:+,.0f}</p>'
+        f'<p class="lbl">Heritage premium ({premium_pct:+.1f}%)</p></div>',
+        unsafe_allow_html=True)
+
+    # ── Verdict line ──
+    if abs(gap_pct) < 10:
+        verdict = f"Close to heritage fair value ({gap_pct:+.1f}%)."
+        st.success(verdict + f" Market paid ${abs(gap):,.0f} {'above' if gap > 0 else 'below'} model.")
+    elif gap_pct > 0:
+        st.info(f"Sold **above** heritage model by {gap_pct:+.1f}% (${abs(gap):,.0f}). Could be unique features the model misses, or a hot market moment.")
+    else:
+        st.warning(f"Sold **below** heritage model by {gap_pct:+.1f}% (${abs(gap):,.0f}). Could be a distressed sale, condition issues, or a bargain.")
+
+    # ── Building profile + mini-map ──
+    st.markdown("---")
+    st.markdown("### Building profile")
+    pc1, pc2 = st.columns([1, 1])
+
+    with pc1:
+        def fmt(v, kind="str"):
+            if pd.isna(v) or v == "" or v == 0:
+                return "Unknown"
+            if kind == "int":   return f"{int(v):,}"
+            if kind == "year":  return f"{int(v)}"
+            if kind == "sqft":  return f"{v:,.0f}"
+            return str(v)
+
+        info = [
+            ("Address",          fmt(row.get("address"))),
+            ("Building name",    fmt(row.get("building_name"))),
+            ("Architect",        fmt(row.get("architect"))),
+            ("Style",            fmt(row.get("style_primary"))),
+            ("Facade material",  fmt(row.get("material_primary"))),
+            ("Era",              fmt(row.get("construction_era"))),
+            ("Year built",       fmt(row.get("construction_year"), "year")),
+            ("Floors",           fmt(row.get("num_floors"), "int")),
+            ("Gross sqft",       fmt(row.get("gross_sqft"), "sqft")),
+            ("Neighborhood",     fmt(row.get("neighborhood"))),
+            ("Landmark",         "Yes" if row.get("is_landmark") == 1 else "No"),
+            ("Historic district","Yes" if row.get("in_historic_district") == 1 else "No"),
+            ("Altered since",    fmt(row.get("last_alteration_year"), "year") if row.get("is_altered") == 1 else "Original"),
+        ]
+        info_df = pd.DataFrame(info, columns=["Field", "Value"])
+        st.dataframe(info_df, use_container_width=True, hide_index=True, height=480)
+
+    with pc2:
+        # Neighborhood dot field + this building as accent marker
+        near = pool[
+            (pool["latitude"].between(row["latitude"] - 0.01, row["latitude"] + 0.01))
+            & (pool["longitude"].between(row["longitude"] - 0.012, row["longitude"] + 0.012))
+        ].copy()
+        fig = px.scatter_mapbox(
+            near, lat="latitude", lon="longitude", opacity=0.35,
+            color_discrete_sequence=[T["muted"]], hover_name="display_name",
+            zoom=14.5, center={"lat": row["latitude"], "lon": row["longitude"]},
+            height=480, template=T["plotly"],
+        )
+        fig.add_trace(go.Scattermapbox(
+            lat=[row["latitude"]], lon=[row["longitude"]],
+            mode="markers",
+            marker=dict(size=24, color=T["accent"]),
+            hovertext=[row.get("display_name", "This property")],
+            name="Selected", showlegend=False,
+        ))
+        fig.update_layout(mapbox_style=T["map_style"], margin={"r":0,"t":0,"l":0,"b":0})
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── SHAP waterfall ──
+    st.markdown("---")
+    st.markdown("### Why this price? Feature contributions")
+    st.caption("Each bar shows how much a feature pushed the heritage prediction up or down from the typical Manhattan historic building. Red drags price down, the theme color pushes it up.")
+
+    try:
+        import shap
+        with st.spinner("Computing SHAP values..."):
+            explainer = shap.TreeExplainer(mh)
+            sv = explainer.shap_values(x_all)
+            ev = explainer.expected_value
+            if hasattr(ev, "__len__"):
+                ev = ev[0]
+
+        explanation = shap.Explanation(
+            values=np.asarray(sv[0]),
+            base_values=float(ev),
+            data=x_all[0],
+            feature_names=FALL,
+        )
+
+        fig_w, _ = plt.subplots(figsize=(11, 6))
+        shap.waterfall_plot(explanation, show=False, max_display=12)
+        plt.tight_layout()
+        st.pyplot(fig_w)
+        plt.close()
+
+        base_dollars = float(np.expm1(ev))
+        st.caption(
+            f"Model baseline (typical building): ~${base_dollars:,.0f}. "
+            f"Sum of feature pushes takes it to ${pred_her:,.0f}."
+        )
+
+    except ImportError:
+        st.error("SHAP is not installed. Run `pip install shap`.")
+    except Exception as e:
+        st.warning(f"SHAP unavailable for this sample: {e}")
+
+
 # ─────────────────────────────────────────────────────────────
 # ROUTER
 # ─────────────────────────────────────────────────────────────
@@ -980,3 +1182,4 @@ elif "2" in page: page2()
 elif "3" in page: page3()
 elif "4" in page: page4()
 elif "5" in page: page5()
+elif "6" in page: page6()
