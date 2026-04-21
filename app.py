@@ -77,7 +77,7 @@ THEMES = {
 
 # Sidebar
 st.sidebar.markdown("### Manhattan Heritage Valuation")
-theme_name = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=0)
+theme_name = st.sidebar.selectbox("Theme", list(THEMES.keys()), index=1)
 T = THEMES[theme_name]
 
 try:
@@ -172,7 +172,8 @@ HERITAGE = [
 
 @st.cache_data
 def prepare_features(dataframe):
-    d = dataframe[dataframe["sale_price"] > 0].copy()
+    # Filter non-market transactions (donations, estate transfers, internal transfers)
+    d = dataframe[dataframe["sale_price"] >= 100_000].copy()
     d["log_price"] = np.log1p(d["sale_price"])
     for cat in ["construction_era", "material_primary", "style_primary"]:
         if cat in d.columns:
