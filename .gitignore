@@ -25,3 +25,6 @@ venv/
 
 # W&B local runs
 wandb/
+
+# Resolved artifacts
+*.resolved
