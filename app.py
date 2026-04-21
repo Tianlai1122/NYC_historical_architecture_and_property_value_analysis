@@ -10,9 +10,12 @@ import pandas as pd
 import numpy as np
 import copy
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
+import pydeck as pdk
+import requests
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
@@ -274,6 +277,47 @@ def train_eval(model, Xtr, ytr, Xte, yte):
     }
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def wiki_lookup(query: str):
+    """Best-effort Wikipedia hit: returns {title, url, extract, image} or None."""
+    if not query or not query.strip():
+        return None
+    try:
+        # Step 1: search for a matching page
+        s = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "list": "search", "srsearch": query,
+                    "format": "json", "srlimit": 1},
+            timeout=4,
+        ).json()
+        hits = s.get("query", {}).get("search", [])
+        if not hits:
+            return None
+        title = hits[0]["title"]
+
+        # Step 2: pull intro + image for that page
+        p = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query", "prop": "pageimages|extracts",
+                "exintro": 1, "explaintext": 1, "piprop": "original",
+                "titles": title, "redirects": 1, "format": "json",
+            },
+            timeout=4,
+        ).json()
+        page = next(iter(p.get("query", {}).get("pages", {}).values()), {})
+        img = page.get("original", {}).get("source")
+        extract = (page.get("extract") or "").strip()
+        return {
+            "title": page.get("title", title),
+            "url": f"https://en.wikipedia.org/wiki/{page.get('title', title).replace(' ', '_')}",
+            "extract": extract[:500] + ("..." if len(extract) > 500 else ""),
+            "image": img,
+        }
+    except Exception:
+        return None
+
+
 # =================================================================
 # PAGE 1. BUSINESS CASE & DATA
 # =================================================================
@@ -389,45 +433,94 @@ def page2():
         horizontal=True,
     )
 
-    # ── MAP ──
+    # ── 3D MAP ──
     if section == "Interactive Map":
-        st.markdown("### Property Map")
-        st.caption("Each dot is a historic property. Choose what variable controls color and size.")
+        st.markdown("### 3D Property Map")
+        st.caption("Each column is a historic property. Height and color encode whatever you pick. Drag to pan, scroll to zoom, right-drag to tilt.")
 
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             color_var = st.selectbox("Color by", [
                 "sale_price", "price_per_sqft", "building_age",
                 "architect_prestige_score", "num_floors", "assess_total",
             ])
         with c2:
-            size_var = st.selectbox("Size by", [
-                "gross_sqft", "sale_price", "num_floors", "building_age",
+            height_var = st.selectbox("Height by", [
+                "sale_price", "gross_sqft", "num_floors", "building_age", "price_per_sqft",
             ])
+        with c3:
+            cmap_name = st.selectbox("Palette", ["plasma", "viridis", "magma", "cividis", "turbo"])
 
-        map_d = viz.dropna(subset=[color_var, size_var]).copy()
-        smax = map_d[size_var].quantile(0.95)
-        map_d["_sz"] = (map_d[size_var].clip(0, smax) / smax * 16 + 3)
+        map_d = viz.dropna(subset=[color_var, height_var, "latitude", "longitude"]).copy()
 
-        fig = px.scatter_mapbox(
-            map_d, lat="latitude", lon="longitude",
-            color=color_var, size="_sz",
-            hover_name="display_name",
-            hover_data={
-                "sale_price": ":,.0f", "construction_era": True,
-                "style_primary": True, "architect": True,
-                "historic_district": True,
-                "latitude": False, "longitude": False, "_sz": False,
+        # Height: clip the top 3% so outliers don't dominate, scale to ~800m max
+        h_vals = pd.to_numeric(map_d[height_var], errors="coerce")
+        h_cap = h_vals.quantile(0.97)
+        map_d["_h"] = (h_vals.clip(lower=0, upper=h_cap) / h_cap * 800).fillna(0)
+
+        # Color: matplotlib colormap -> RGB list
+        c_vals = pd.to_numeric(map_d[color_var], errors="coerce").fillna(map_d[color_var].median())
+        norm = mcolors.Normalize(vmin=c_vals.quantile(0.02), vmax=c_vals.quantile(0.98))
+        cmap = plt.get_cmap(cmap_name)
+        rgba = cmap(norm(c_vals.values))
+        map_d["_r"] = (rgba[:, 0] * 255).astype(int)
+        map_d["_g"] = (rgba[:, 1] * 255).astype(int)
+        map_d["_b"] = (rgba[:, 2] * 255).astype(int)
+
+        # Tooltip needs pre-formatted strings; pydeck can't format numbers
+        map_d["price_fmt"] = map_d["sale_price"].apply(lambda v: f"${v:,.0f}")
+        map_d["sqft_fmt"] = map_d["gross_sqft"].apply(
+            lambda v: f"{v:,.0f} sqft" if pd.notna(v) else "unknown sqft")
+        map_d["arch_fmt"] = map_d["architect"].fillna("Unknown architect")
+        map_d["style_fmt"] = map_d["style_primary"].fillna("")
+        map_d["era_fmt"] = map_d["construction_era"].fillna("")
+
+        # Carto base layer, no mapbox token needed
+        is_dark = T["plotly"] == "plotly_dark"
+        pdk_style = "dark" if is_dark else "light"
+
+        layer = pdk.Layer(
+            "ColumnLayer",
+            data=map_d,
+            get_position=["longitude", "latitude"],
+            get_elevation="_h",
+            elevation_scale=1,
+            radius=22,
+            get_fill_color=["_r", "_g", "_b", 210],
+            pickable=True,
+            auto_highlight=True,
+            extruded=True,
+        )
+
+        view = pdk.ViewState(
+            latitude=40.754, longitude=-73.987,
+            zoom=12.2, pitch=50, bearing=20,
+        )
+
+        tooltip = {
+            "html": (
+                "<div style='font-family: Inter, sans-serif; padding: 8px 12px; min-width: 180px;'>"
+                "<b style='font-size: 14px;'>{display_name}</b><br/>"
+                "<span style='color:#9ca3af;'>{price_fmt}</span><br/>"
+                "<span>{style_fmt}</span><br/>"
+                "<span style='color:#9ca3af;'>by {arch_fmt}</span><br/>"
+                "<span style='color:#9ca3af;'>{era_fmt} · {sqft_fmt}</span>"
+                "</div>"
+            ),
+            "style": {
+                "backgroundColor": "rgba(17,24,39,0.95)",
+                "color": "white",
+                "borderRadius": "10px",
+                "boxShadow": "0 4px 18px rgba(0,0,0,0.3)",
             },
-            color_continuous_scale="Plasma",
-            zoom=12, center={"lat": 40.754, "lon": -73.987},
-            height=580, template=T["plotly"],
+        }
+
+        deck = pdk.Deck(
+            layers=[layer], initial_view_state=view,
+            map_provider="carto", map_style=pdk_style,
+            tooltip=tooltip,
         )
-        fig.update_layout(
-            mapbox_style=T["map_style"],
-            margin={"r": 0, "t": 0, "l": 0, "b": 0},
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        st.pydeck_chart(deck, use_container_width=True)
 
         st.markdown("---")
         st.markdown("### Construction Era Map")
@@ -1080,6 +1173,32 @@ def page6():
         st.info(f"Sold **above** heritage model by {gap_pct:+.1f}% (${abs(gap):,.0f}). Could be unique features the model misses, or a hot market moment.")
     else:
         st.warning(f"Sold **below** heritage model by {gap_pct:+.1f}% (${abs(gap):,.0f}). Could be a distressed sale, condition issues, or a bargain.")
+
+    # ── Wikipedia spotlight (best-effort) ──
+    bname = str(row.get("building_name") or "").strip()
+    arch  = str(row.get("architect") or "").strip()
+    wiki = None
+    if bname and bname.lower() not in ("0", "none", "nan"):
+        wiki = wiki_lookup(bname)
+    if (not wiki or not wiki.get("image")) and arch and arch.lower() not in ("unknown", "0"):
+        arch_wiki = wiki_lookup(arch)
+        if arch_wiki and arch_wiki.get("image"):
+            wiki = arch_wiki
+
+    if wiki and (wiki.get("image") or wiki.get("extract")):
+        st.markdown("---")
+        st.markdown("### Heritage spotlight")
+        wc1, wc2 = st.columns([1, 2])
+        with wc1:
+            if wiki.get("image"):
+                st.image(wiki["image"], use_container_width=True)
+            else:
+                st.caption("No photo found on Wikipedia.")
+        with wc2:
+            st.markdown(f"**{wiki['title']}**  ·  [Open on Wikipedia ↗]({wiki['url']})")
+            if wiki.get("extract"):
+                st.markdown(f"<p style='color:{T['muted']};line-height:1.55;'>{wiki['extract']}</p>",
+                            unsafe_allow_html=True)
 
     # ── Building profile + mini-map ──
     st.markdown("---")
