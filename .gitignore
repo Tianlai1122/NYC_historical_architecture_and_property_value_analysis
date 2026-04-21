@@ -1,0 +1,27 @@
+# Large source data files (not needed — merged CSV is included)
+Primary_Land_Use_Tax_Lot_Output_*.csv
+Individual_Landmark_and_Historic_District_*.csv
+NYC_Citywide_Rolling_Calendar_Sales_*.csv
+Manhattan_Merged_All_Three.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env
+.env
+venv/
+.venv/
+
+# W&B local runs
+wandb/
