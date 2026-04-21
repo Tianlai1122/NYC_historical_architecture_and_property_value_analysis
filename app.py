@@ -728,6 +728,72 @@ def page2():
                                  "price_per_sqft": "$/SqFt"})
         st.plotly_chart(fig, use_container_width=True)
 
+        # ── Architect Value Leaderboard ──
+        st.markdown("---")
+        st.markdown("### Architect Value Leaderboard")
+        st.caption("Which architects' buildings hold the most value? Sortable table — click any column header.")
+
+        min_n = st.slider("Minimum buildings per architect", 3, 25, 5, key="arch_minN")
+
+        # Drop non-market transactions (internal transfers, easements) that would
+        # tank the baseline. Manhattan reality: anything under $50/sqft isn't a real sale.
+        market = viz[(viz["sale_price"] >= 100_000) & (viz["price_per_sqft"] >= 50)].copy()
+        city_med_psf = market["price_per_sqft"].median()
+
+        # Build per-architect stats
+        g = (market.dropna(subset=["architect"])
+                .groupby("architect")
+                .agg(buildings=("BBL", "count"),
+                     median_price=("sale_price", "median"),
+                     median_psf=("price_per_sqft", "median"),
+                     landmark_share=("is_landmark", "mean"),
+                     prestige=("architect_prestige_score", "mean"),
+                     hist_dist_share=("in_historic_district", "mean"))
+                .reset_index())
+        g = g[g["buildings"] >= min_n].copy()
+        # Heritage premium = how much above city-wide $/sqft, in percent
+        g["heritage_premium_pct"] = (g["median_psf"] / city_med_psf - 1) * 100
+        g = g.sort_values("heritage_premium_pct", ascending=False)
+        g.insert(0, "Rank", range(1, len(g) + 1))
+
+        leaderboard = g.rename(columns={
+            "architect": "Architect",
+            "buildings": "# Buildings",
+            "median_price": "Median Sale Price",
+            "median_psf": "Median $/SqFt",
+            "heritage_premium_pct": "Heritage Premium %",
+            "landmark_share": "% Landmarked",
+            "hist_dist_share": "% in Hist. Dist.",
+            "prestige": "Prestige Score",
+        })
+
+        st.dataframe(
+            leaderboard.style.format({
+                "Median Sale Price": "${:,.0f}",
+                "Median $/SqFt": "${:,.0f}",
+                "Heritage Premium %": "{:+.1f}%",
+                "% Landmarked": "{:.0%}",
+                "% in Hist. Dist.": "{:.0%}",
+                "Prestige Score": "{:.2f}",
+            }).background_gradient(subset=["Heritage Premium %"], cmap="RdYlGn"),
+            use_container_width=True,
+            height=460,
+        )
+
+        # Quick top-5 highlight cards
+        top5 = g.head(5)
+        st.markdown("#### Top 5 Value Premium Architects")
+        ccols = st.columns(5)
+        for col, (_, r) in zip(ccols, top5.iterrows()):
+            col.markdown(
+                f'<div class="card">'
+                f'<p class="lbl">#{int(r["Rank"])} &middot; {int(r["buildings"])} bldgs</p>'
+                f'<p class="val" style="font-size:1.05rem; line-height:1.2;">{r["architect"]}</p>'
+                f'<p class="lbl" style="margin-top:0.4rem;">+{r["heritage_premium_pct"]:.0f}% vs city</p>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
     # ── ERA & CORRELATION ──
     else:
         st.markdown("### Price by Construction Era")
