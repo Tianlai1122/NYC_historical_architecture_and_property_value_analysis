@@ -31,6 +31,13 @@ try:
 except ImportError:
     HAS_LGBM = False
 
+# Optional: CatBoost. Native categorical handling, works great on smallish datasets.
+try:
+    from catboost import CatBoostRegressor
+    HAS_CATBOOST = True
+except ImportError:
+    HAS_CATBOOST = False
+
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────────────────────
@@ -758,6 +765,13 @@ def page3():
         MODELS["LightGBM"] = (
             lgb.LGBMRegressor(n_estimators=300, num_leaves=31, learning_rate=0.05,
                               random_state=rs, n_jobs=-1, verbose=-1),
+            False,
+        )
+    if HAS_CATBOOST:
+        # CatBoost with quiet logging; small dataset so keep it light
+        MODELS["CatBoost"] = (
+            CatBoostRegressor(iterations=500, depth=6, learning_rate=0.05,
+                              random_seed=rs, verbose=0, allow_writing_files=False),
             False,
         )
 
