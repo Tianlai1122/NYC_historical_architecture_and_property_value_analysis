@@ -1304,6 +1304,28 @@ def page5():
     title("Hyperparameter Tuning",
           "Grid search with optional Weights & Biases experiment tracking")
 
+    # ── Beginner intro: what's hyperparameter tuning, in plain English ──
+    with st.expander("📚 New here? What is hyperparameter tuning?", expanded=False):
+        st.markdown("""
+**TL;DR:** Hyperparameters are the dials *you* set before training. The model learns
+its own weights *from* the data, but it doesn't pick its own dials. Tuning means
+trying many dial combinations and keeping the one that works best on held-out data.
+
+- **Grid search** = try every combination you list. Simple and exhaustive.
+- **Test size** = how much of the data to hold out for scoring (20% is standard).
+- **R²** = "how much of the price variance does the model explain?" Higher is better, max is 1.
+- **MAE** = average dollar error. Lower is better.
+
+**Picking a model:**
+- *Linear (Ridge / Lasso / Elastic Net)* → fast, interpretable, but caps out at R² ~0.20 on this data.
+- *Decision Tree* → great for explaining a single decision path, weak alone.
+- *Random Forest / Gradient Boosting* → strong all-rounders, usually R² ~0.55-0.60.
+- *LightGBM* → the fastest of the heavy hitters, usually wins.
+
+Start with **LightGBM** if you want best results fast, or **Ridge** if you want to
+understand which features matter linearly.
+        """)
+
     X = mdf[FALL].values
     y = mdf["log_price"].values
 
@@ -1316,9 +1338,81 @@ def page5():
 
     c1, c2 = st.columns(2)
     with c1:
-        model_name = st.selectbox("Model", tune_choices)
+        model_name = st.selectbox("Model", tune_choices,
+                                  help="Pick a model family. Different models expose different dials.")
     with c2:
-        test_sz = st.slider("Test size", 0.1, 0.4, 0.2, 0.05, key="hp_ts")
+        test_sz = st.slider("Test size", 0.1, 0.4, 0.2, 0.05, key="hp_ts",
+                            help="Fraction of data held out for scoring. 20% is the standard. "
+                                 "Smaller = more training data but noisier scores.")
+
+    # ── Per-model tutorial. Subtle but always there for someone new. ──
+    MODEL_TUTORIALS = {
+        "Ridge Regression": {
+            "what": "Linear regression with **L2 penalty** — shrinks coefficients toward zero so big features don't dominate. Good when many features are mildly useful.",
+            "params": [
+                ("Alpha", "Regularization strength. ↑ alpha = simpler model (more shrinkage, less overfitting). ↓ alpha = closer to plain linear regression. Try `0.01, 0.1, 1, 10, 100` to see the curve."),
+            ],
+            "watch": "Train R² and Test R² both stable across alpha → model isn't overfitting much. Diverging → too little regularization.",
+        },
+        "Lasso Regression": {
+            "what": "Linear regression with **L1 penalty** — actually drives some coefficients to **exactly zero**, doing automatic feature selection.",
+            "params": [
+                ("Alpha", "Regularization strength. ↑ alpha = more features killed off. ↓ alpha = more features survive. Watch how many coefficients hit zero as alpha grows."),
+            ],
+            "watch": "If R² stays fine even at high alpha, the surviving features carry all the signal — the rest were noise.",
+        },
+        "Elastic Net": {
+            "what": "**Mix of Ridge + Lasso.** Ridge for stability, Lasso for sparsity.",
+            "params": [
+                ("Alpha", "Total regularization strength."),
+                ("L1 ratio", "0 = pure Ridge, 1 = pure Lasso. 0.5 = even mix. Use this when you can't decide between Ridge and Lasso."),
+            ],
+            "watch": "Best when Ridge and Lasso both give decent but imperfect scores — Elastic Net often beats both.",
+        },
+        "Decision Tree": {
+            "what": "Splits data into yes/no questions, ending in price predictions. Easy to interpret as a flow chart.",
+            "params": [
+                ("Max Depth", "How many questions deep the tree can go. ↑ depth = more complex (risks overfitting). ↓ depth = simpler. `None` = unlimited."),
+                ("Min Samples Split", "Minimum samples needed to split a node. ↑ value = more conservative tree, less overfitting. Try 2, 10, 20."),
+            ],
+            "watch": "Big gap between Train R² (high) and Test R² (low) = overfit. Lower max_depth or raise min_samples_split.",
+        },
+        "Random Forest": {
+            "what": "Many decision trees voting together. Each tree sees a random slice of data and features. Robust by design.",
+            "params": [
+                ("N Estimators", "Number of trees. More trees = more stable predictions but slower. Diminishing returns past ~200."),
+                ("Max Depth", "How deep each tree can grow. Deeper = capture more, but trees memorize. `None` lets each tree grow to perfect fit on its sample."),
+            ],
+            "watch": "Random Forest rarely overfits even with deep trees, because the randomness averages out. Tune n_estimators for stability, max_depth for speed.",
+        },
+        "Gradient Boosting": {
+            "what": "Trees added **one at a time**, each new tree fixing what the previous trees got wrong. Powerful but slower and more sensitive than Random Forest.",
+            "params": [
+                ("Learning Rate", "How much each new tree gets to fix. ↓ rate + ↑ trees = slow but accurate. ↑ rate + ↓ trees = fast but rough. Classic combos: `(0.01, 500)` or `(0.1, 100)`."),
+                ("N Estimators", "Number of boosting rounds (trees added)."),
+                ("Max Depth", "Each tree's depth. 3-7 is the sweet spot — boosting prefers many shallow trees over a few deep ones."),
+            ],
+            "watch": "If train R² ≫ test R², you're overfitting — drop max_depth, lower learning rate, or fewer estimators.",
+        },
+        "LightGBM": {
+            "what": "Modern gradient boosting library. Faster and usually more accurate than sklearn's Gradient Boosting.",
+            "params": [
+                ("N Estimators", "Number of boosting rounds. Pair with learning rate."),
+                ("Num Leaves", "Max leaves per tree. Controls tree complexity. ↑ leaves = more flexible, risks overfit. Sweet spot 31-63 for most data."),
+                ("Learning Rate", "Step size per tree. Lower = more careful learning. Combine 0.05 + 200 trees for best results, or 0.1 + 100 for speed."),
+            ],
+            "watch": "LightGBM trains in seconds. Try wide grids without fear. The default num_leaves=31 is usually fine.",
+        },
+    }
+
+    if model_name in MODEL_TUTORIALS:
+        tut = MODEL_TUTORIALS[model_name]
+        with st.expander(f"💡 How **{model_name}** works & how to tune it", expanded=False):
+            st.markdown(f"**What it does:** {tut['what']}")
+            st.markdown("**Parameters:**")
+            for pname, ptext in tut["params"]:
+                st.markdown(f"- **{pname}** — {ptext}")
+            st.info(f"**What to watch:** {tut['watch']}")
 
     st.markdown("---")
     st.markdown("### Hyperparameter Grid")
@@ -1326,46 +1420,60 @@ def page5():
 
     if model_name == "Ridge Regression":
         alphas = st.multiselect("Alpha", [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
-                                default=[0.01, 0.1, 1.0, 10.0, 100.0])
+                                default=[0.01, 0.1, 1.0, 10.0, 100.0],
+                                help="Higher alpha = more shrinkage on coefficients = simpler model.")
         grid = [{"alpha": a} for a in alphas]
 
     elif model_name == "Lasso Regression":
         alphas = st.multiselect("Alpha", [0.0001, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
-                                default=[0.001, 0.01, 0.1, 0.5])
+                                default=[0.001, 0.01, 0.1, 0.5],
+                                help="Higher alpha = more coefficients pushed exactly to zero.")
         grid = [{"alpha": a} for a in alphas]
 
     elif model_name == "Elastic Net":
         alphas = st.multiselect("Alpha", [0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
-                                default=[0.01, 0.05, 0.1])
+                                default=[0.01, 0.05, 0.1],
+                                help="Total regularization strength.")
         l1s = st.multiselect("L1 ratio", [0.1, 0.3, 0.5, 0.7, 0.9],
-                             default=[0.3, 0.5, 0.7])
+                             default=[0.3, 0.5, 0.7],
+                             help="0 = pure Ridge, 1 = pure Lasso, 0.5 = even mix.")
         grid = [{"alpha": a, "l1_ratio": l} for a in alphas for l in l1s]
 
     elif model_name == "LightGBM":
-        nes = st.multiselect("N Estimators", [100, 200, 400, 800], default=[200, 400])
-        leaves = st.multiselect("Num Leaves", [15, 31, 63, 127], default=[31, 63])
-        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1], default=[0.05, 0.1])
+        nes = st.multiselect("N Estimators", [100, 200, 400, 800], default=[200, 400],
+                             help="Number of boosting trees. Pair with learning rate.")
+        leaves = st.multiselect("Num Leaves", [15, 31, 63, 127], default=[31, 63],
+                                help="Max leaves per tree. Higher = more flexible, risks overfit.")
+        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1], default=[0.05, 0.1],
+                             help="Step size per tree. Lower = more careful, needs more trees.")
         grid = [{"n_estimators": n, "num_leaves": lv, "learning_rate": lr}
                 for n in nes for lv in leaves for lr in lrs]
 
     elif model_name == "Decision Tree":
-        depths = st.multiselect("Max Depth", [2, 3, 5, 7, 10, 15, None], default=[3, 5, 10])
-        mins = st.multiselect("Min Samples Split", [2, 5, 10, 20], default=[2, 5, 10])
+        depths = st.multiselect("Max Depth", [2, 3, 5, 7, 10, 15, None], default=[3, 5, 10],
+                                help="How many yes/no splits deep the tree can go. None = unlimited.")
+        mins = st.multiselect("Min Samples Split", [2, 5, 10, 20], default=[2, 5, 10],
+                              help="Min samples needed to split a node. Higher = more conservative.")
         grid = [{"max_depth": d, "min_samples_split": s} for d in depths for s in mins]
 
     elif model_name == "Random Forest":
-        nes = st.multiselect("N Estimators", [50, 100, 200, 300], default=[50, 100, 200])
-        deps = st.multiselect("Max Depth", [5, 10, 15, None], default=[5, 10, 15])
+        nes = st.multiselect("N Estimators", [50, 100, 200, 300], default=[50, 100, 200],
+                             help="Number of trees in the forest. More = stable, slower.")
+        deps = st.multiselect("Max Depth", [5, 10, 15, None], default=[5, 10, 15],
+                              help="Each tree's depth. None = grow until each leaf is pure.")
         grid = [{"n_estimators": n, "max_depth": d} for n in nes for d in deps]
 
     else:  # Gradient Boosting
-        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1, 0.2], default=[0.01, 0.1])
-        nes = st.multiselect("N Estimators", [50, 100, 200], default=[50, 100])
-        deps = st.multiselect("Max Depth", [3, 5, 7], default=[3, 5])
+        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1, 0.2], default=[0.01, 0.1],
+                             help="How much each tree fixes. Lower + more trees usually wins.")
+        nes = st.multiselect("N Estimators", [50, 100, 200], default=[50, 100],
+                             help="Number of boosting rounds.")
+        deps = st.multiselect("Max Depth", [3, 5, 7], default=[3, 5],
+                              help="Per-tree depth. Boosting likes shallow trees (3-7).")
         grid = [{"learning_rate": lr, "n_estimators": n, "max_depth": d}
                 for lr in lrs for n in nes for d in deps]
 
-    st.caption(f"Total experiments: **{len(grid)}**")
+    st.caption(f"Total experiments: **{len(grid)}** — each combination trains a fresh model and is logged separately.")
 
     # ── W&B setup ──
     st.markdown("---")
