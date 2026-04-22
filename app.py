@@ -564,13 +564,21 @@ def page2():
             color_var = st.selectbox("Color by", [
                 "sale_price", "price_per_sqft", "building_age",
                 "architect_prestige_score", "num_floors", "assess_total",
-            ], format_func=flabel)
+            ], format_func=flabel,
+               help="Each property's color encodes this value. The legend below the map shows the scale.")
         with c2:
             height_var = st.selectbox("Height by", [
                 "sale_price", "gross_sqft", "num_floors", "building_age", "price_per_sqft",
-            ], format_func=flabel)
+            ], format_func=flabel,
+               help="Taller column = higher value of this variable.")
         with c3:
-            cmap_name = st.selectbox("Palette", ["plasma", "viridis", "magma", "cividis", "turbo"])
+            # Magma = dark purple to bright yellow, super readable on dark backgrounds.
+            # Reordered so the most legible options come first.
+            cmap_name = st.selectbox(
+                "Color palette",
+                ["magma", "inferno", "viridis", "plasma", "turbo", "cividis"],
+                help="Magma & Inferno read best on dark mode; Viridis is colorblind-friendly.",
+            )
 
         map_d = viz.dropna(subset=[color_var, height_var, "latitude", "longitude"]).copy()
 
@@ -642,6 +650,52 @@ def page2():
             tooltip=tooltip,
         )
         st.pydeck_chart(deck, use_container_width=True)
+
+        # ── Color legend ──
+        # pydeck won't render a colorbar on its own, so build one manually in CSS.
+        # Format min/max in human units depending on which variable we colored by.
+        c_min, c_max = c_vals.quantile(0.02), c_vals.quantile(0.98)
+        def _fmt(v, varname):
+            if "price" in varname or "assess" in varname:
+                return f"${v:,.0f}"
+            if "age" in varname:
+                return f"{v:,.0f} yrs"
+            return f"{v:,.0f}"
+
+        # Build a CSS gradient string from the chosen matplotlib colormap (10 stops)
+        stops = [cmap(i / 9) for i in range(10)]
+        gradient_css = ", ".join(
+            f"rgb({int(r*255)},{int(g*255)},{int(b*255)}) {i*100/9:.0f}%"
+            for i, (r, g, b, _) in enumerate(stops)
+        )
+        pretty_color = FRIENDLY_LABELS.get(color_var, color_var)
+        pretty_height = FRIENDLY_LABELS.get(height_var, height_var)
+        st.markdown(
+            f"""
+            <div style="display:flex; align-items:center; gap:14px; padding:10px 14px;
+                        background:{T['card_bg']}; border:1px solid {T['card_border']};
+                        border-radius:12px; margin-top:8px; font-family:Inter,sans-serif;">
+              <div style="font-size:0.78rem; color:{T['muted']}; text-transform:uppercase; letter-spacing:0.05em;">
+                Color = {pretty_color}
+              </div>
+              <div style="font-size:0.82rem; color:{T['text']}; min-width:64px; text-align:right;">
+                {_fmt(c_min, color_var)}
+              </div>
+              <div style="flex:1; height:14px; border-radius:7px;
+                          background: linear-gradient(to right, {gradient_css});
+                          box-shadow: inset 0 0 0 1px {T['card_border']};"></div>
+              <div style="font-size:0.82rem; color:{T['text']}; min-width:64px;">
+                {_fmt(c_max, color_var)}
+              </div>
+              <div style="font-size:0.72rem; color:{T['muted']};">
+                ↕ Height = {pretty_height}
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Low {pretty_color} on the left, high on the right. "
+                   f"Taller columns = higher {pretty_height}.")
 
         st.markdown("---")
         st.markdown("### Construction Era Map")
@@ -1143,16 +1197,25 @@ def page3():
     test_rows["residual_pct"] = (test_rows["actual_price"] / test_rows["pred_price"] - 1) * 100
     test_rows["abs_dollar_diff"] = test_rows["actual_price"] - test_rows["pred_price"]
 
-    # Map: each property colored by residual sign and sized by magnitude
+    # Map: each property colored by residual sign and sized by magnitude.
+    # Using a custom diverging palette: vivid red for discount, vivid green for premium,
+    # neutral cream in the middle. Clearer than RdBu on dark backgrounds.
     map_d = test_rows.dropna(subset=["latitude", "longitude"]).copy()
+    diverging = [
+        [0.0, "#dc2626"],   # market paid less (model thinks it's worth more)
+        [0.25, "#f87171"],
+        [0.5, "#fef3c7"],   # right on prediction
+        [0.75, "#4ade80"],
+        [1.0, "#15803d"],   # market paid more (trophy premium)
+    ]
     fig_map = px.scatter_mapbox(
         map_d,
         lat="latitude", lon="longitude",
         color="residual_pct",
-        color_continuous_scale="RdBu_r", color_continuous_midpoint=0,
-        range_color=[-100, 100],
-        size=map_d["residual_pct"].abs().clip(0, 200),
-        size_max=22,
+        color_continuous_scale=diverging, color_continuous_midpoint=0,
+        range_color=[-80, 80],
+        size=map_d["residual_pct"].abs().clip(5, 150),
+        size_max=24,
         hover_name="display_name",
         hover_data={
             "actual_price": ":$,.0f", "pred_price": ":$,.0f",
@@ -1164,8 +1227,19 @@ def page3():
         mapbox_style=T["map_style"],
         labels={"residual_pct": "Residual %"},
     )
-    fig_map.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+    fig_map.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0),
+        coloraxis_colorbar=dict(
+            title="Residual %",
+            ticksuffix="%",
+            tickvals=[-80, -40, 0, 40, 80],
+            ticktext=["−80%<br>Discount", "−40%", "0%<br>On model", "+40%", "+80%<br>Premium"],
+        ),
+    )
     st.plotly_chart(fig_map, use_container_width=True)
+    st.caption("🔴 **Red = Discount** (market paid less than model expected) &nbsp;·&nbsp; "
+               "🟢 **Green = Premium** (market paid more) &nbsp;·&nbsp; "
+               "Bigger dot = bigger miss.")
 
     # ── Top 10 over/under priced ──
     st.markdown("### Biggest Misses by the Model")
