@@ -827,6 +827,61 @@ def page2():
                             labels={"is_altered": "Altered (1=Yes)", "price_per_sqft": "$/SqFt"})
             st.plotly_chart(fig, use_container_width=True)
 
+        # ── Sankey: Era → Style → Price Tier ──
+        # How architectural choices in each era translate to modern price brackets
+        st.markdown("---")
+        st.markdown("### Era → Style → Price Tier Flow")
+        st.caption("Follow each construction era through its dominant styles into today's price tiers. Width = number of properties.")
+
+        sk = viz.dropna(subset=["construction_era", "style_primary", "sale_price"]).copy()
+        # Keep only top 8 styles by frequency to avoid a hairball
+        top_styles = sk["style_primary"].value_counts().head(8).index
+        sk = sk[sk["style_primary"].isin(top_styles)]
+        # Bucket price into 4 quartile tiers with readable labels
+        q = sk["sale_price"].quantile([0.25, 0.5, 0.75]).values
+        def tier(p):
+            if p < q[0]: return "Tier 4: Budget"
+            if p < q[1]: return "Tier 3: Mid"
+            if p < q[2]: return "Tier 2: High"
+            return "Tier 1: Top"
+        sk["price_tier"] = sk["sale_price"].apply(tier)
+
+        eras = sorted(sk["construction_era"].unique().tolist())
+        styles = sk["style_primary"].value_counts().index.tolist()
+        tiers = ["Tier 1: Top", "Tier 2: High", "Tier 3: Mid", "Tier 4: Budget"]
+        nodes = eras + styles + tiers
+        idx = {n: i for i, n in enumerate(nodes)}
+
+        # Era -> Style edges
+        es = sk.groupby(["construction_era", "style_primary"]).size().reset_index(name="n")
+        # Style -> Tier edges
+        st_t = sk.groupby(["style_primary", "price_tier"]).size().reset_index(name="n")
+
+        sources = ([idx[e] for e in es["construction_era"]]
+                   + [idx[s] for s in st_t["style_primary"]])
+        targets = ([idx[s] for s in es["style_primary"]]
+                   + [idx[t] for t in st_t["price_tier"]])
+        values = list(es["n"]) + list(st_t["n"])
+
+        # Color tier nodes from red->green by tier rank
+        tier_colors = {"Tier 1: Top": "#16a34a", "Tier 2: High": "#84cc16",
+                       "Tier 3: Mid": "#facc15", "Tier 4: Budget": "#ef4444"}
+        node_colors = (["#94a3b8"] * len(eras)
+                       + [T["accent"]] * len(styles)
+                       + [tier_colors[t] for t in tiers])
+
+        fig_sk = go.Figure(go.Sankey(
+            arrangement="snap",
+            node=dict(label=nodes, pad=14, thickness=16,
+                      line=dict(color="rgba(0,0,0,0.1)", width=0.5),
+                      color=node_colors),
+            link=dict(source=sources, target=targets, value=values,
+                      color="rgba(148,163,184,0.35)"),
+        ))
+        fig_sk.update_layout(template=T["plotly"], height=560,
+                             margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_sk, use_container_width=True)
+
         st.markdown("---")
         st.markdown("### Correlation Matrix")
         corr_cols = ["sale_price", "price_per_sqft", "building_age", "num_floors",
