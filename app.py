@@ -1,5 +1,5 @@
 """
-Manhattan Heritage Property Valuation
+Manhattan 
 Financial Premium of Historic Preservation in Manhattan
 
 Central Question: Does architectural heritage create measurable market value?
