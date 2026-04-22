@@ -1,89 +1,125 @@
-# NYC Historical Architecture and Property Value Analysis
+# NYC Historical Architecture & Property Value Analysis
 
-## What This Project Does
+A Streamlit app that asks a single question:
+> **Does a building's architectural heritage create measurable market value in Manhattan?**
 
-This is a Streamlit web application that answers one question: **does a building's architectural heritage affect its market price in Manhattan?**
+Most real-estate pricing models stop at structural features (square footage, lot size, floors). We add **architect prestige, construction era, facade material, architectural style, landmark status, and historic-district membership**, then measure whether those features contribute to sale price on top of the baseline.
 
-Most real estate pricing models only use structural features like square footage, lot size, and number of floors. We go further by adding architectural and preservation characteristics — construction era, architect prestige, facade material, architectural style, historic district status — and measuring whether those features create a detectable "preservation premium."
+The short answer turned out to be more interesting than expected — the heritage premium exists but is largely already baked into the city's tax assessment. Full analytical write-up: [FINDINGS.md](FINDINGS.md).
 
-## How It Works
+---
 
-We merged three NYC open datasets into one unified dataset of **2,864 historic properties** in Manhattan:
+## The App (6 Pages)
 
-| Dataset | What It Provides |
-|---------|-----------------|
-| NYC Rolling Sales | Sale prices, transaction dates |
-| MapPLUTO | Building dimensions, zoning, GPS coordinates, tax assessments |
-| Landmark Database | Architect, architectural style, facade material, historic district, alteration history |
+| # | Page | What's there |
+|---|---|---|
+| 1 | **Business Case & Data** | Research question, data merge strategy, dataset preview, summary KPIs. |
+| 2 | **Visualizations & Maps** | 3D pydeck property map, era / style / material price comparisons, **Architect Value Leaderboard** with heritage premium ranking, **Era → Style → Price Tier Sankey**, correlation heatmap. |
+| 3 | **Prediction Models** | 8 regression models trained side-by-side on Baseline vs Heritage feature sets. Live mini-leaderboard, Manhattan trivia carousel during training, **residual map** + top 10 over/under-priced properties. |
+| 4 | **Feature Importance** | Per-model importance bar charts, full SHAP summary plot, individual SHAP waterfall for any test sample. Friendly column names throughout. |
+| 5 | **Hyperparameter Tuning** | Grid search across configurable parameter ranges. Optional Weights & Biases integration with in-app API-key input. |
+| 6 | **Property Valuator** *(extra)* | Pick any property, see Baseline vs Heritage predictions, 80% confidence interval via LightGBM quantile regression, SHAP waterfall, and a Wikipedia card pulling photos for famous buildings. |
 
-All three datasets are joined on **BBL (Borough-Block-Lot)**, NYC's unique property identifier.
+---
 
-## The App (5 Pages)
+## Models (8 total)
 
-**Page 1 — Business Case & Data**
-Overview of the research question, data sources, merge strategy, and a preview of the final dataset.
+| Family | Models |
+|---|---|
+| Linear | Linear Regression, Ridge, Lasso, Elastic Net |
+| Tree | Decision Tree, Random Forest |
+| Gradient Boosting | sklearn Gradient Boosting, **LightGBM**, **CatBoost** |
 
-**Page 2 — Visualizations & Maps**
-Interactive Plotly maps showing property locations colored by price, building age, or architect prestige. Charts comparing price across architectural styles, facade materials, construction eras, and neighborhoods.
+Best test R² on log-price (full feature set, 80/20 split): **LightGBM 0.618 / CatBoost 0.616**.
 
-**Page 3 — Prediction Models**
-Six regression models (Linear, Ridge, Lasso, Decision Tree, Random Forest, Gradient Boosting) trained on two feature sets side by side:
-- **Baseline:** structural features only (sqft, floors, lot size, assessments)
-- **Heritage-Enhanced:** structural + architectural features (style, era, architect prestige, landmark status)
+---
 
-The page shows which models improve when heritage features are added.
+## Data
 
-**Page 4 — Feature Importance (SHAP)**
-SHAP explainability analysis showing which features drive predictions. Features are color-coded as Baseline vs Heritage so you can see how much architectural character contributes to the model.
+Three NYC open datasets merged on **BBL (Borough-Block-Lot)**:
 
-**Page 5 — Hyperparameter Tuning**
-Grid search with configurable parameter ranges. Optional integration with Weights & Biases for experiment tracking.
+| Dataset | Provides |
+|---|---|
+| NYC Rolling Sales | Sale price, sale date, building class |
+| MapPLUTO | Building dimensions, zoning, GPS, tax assessment, FAR |
+| Landmarks Database | Architect, style, material, historic district, alteration year |
+
+After merging and filtering for sales ≥ $100K: **2,864 properties × 62 columns**.
+
+### Engineered features
+
+| Feature | Notes |
+|---|---|
+| `building_age` | 2026 minus construction year |
+| `construction_era` | Bucketed: Pre-1850, 1850–1899, 1900–1919, 1920–1939 (Art Deco), 1940–1969 (Mid-Century), 1970+ |
+| `architect_prestige_score` | Frequency-weighted count of buildings per architect in the dataset |
+| `architect_building_count` | Raw portfolio size |
+| `rare_style_score` / `style_frequency` | Style rarity, both raw and inverse-frequency weighted |
+| `years_since_alteration` | Recency of last renovation (sentinel for never-altered) |
+| `is_landmark` / `in_historic_district` | Binary flags from the Landmark database |
+
+Feature schema and prep logic live in `prepare_data.py` and the top of `app.py`.
+
+---
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-python3 -m streamlit run app.py
+streamlit run app.py
 ```
 
-Open http://localhost:8501 in your browser.
+Open <http://localhost:8501>.
 
-To rebuild the dataset from the three source files (optional):
+To rebuild the merged dataset from the three source CSVs (optional, source files not included in repo):
 ```bash
 python3 prepare_data.py
 ```
 
+### Weights & Biases (optional)
+
+Page 5 supports W&B experiment tracking. Either:
+- Run `wandb login` once in your terminal, **or**
+- Paste your API key into the input field on the Hyperparameter Tuning page.
+
+Project name on W&B: `Manhattan-heritage-property-analysis-app`.
+
+---
+
 ## Tech Stack
 
-- **App:** Streamlit
-- **Visualization:** Plotly (interactive maps & charts), Matplotlib, Seaborn
-- **ML:** scikit-learn (6 regression models)
-- **Explainability:** SHAP
-- **Experiment Tracking:** Weights & Biases (optional)
-- **Data:** pandas, numpy
+- **App framework:** Streamlit (multi-page sidebar navigation, glassy custom CSS)
+- **Visualization:** Plotly (interactive charts, Sankey, mapbox-free maps), pydeck (3D ColumnLayer), Matplotlib + Seaborn
+- **ML:** scikit-learn, LightGBM (regular + quantile), CatBoost
+- **Explainability:** SHAP (TreeExplainer + LinearExplainer, summary plot + waterfall)
+- **Experiment tracking:** Weights & Biases (optional)
+- **External data:** Wikipedia API (auto-fetches building photos and intros for the Property Valuator)
+
+---
 
 ## Project Structure
 
 ```
-├── app.py                              # Streamlit application (5 pages)
+├── app.py                              # Streamlit application (6 pages)
 ├── prepare_data.py                     # Data merge & feature engineering pipeline
 ├── Manhattan_Heritage_Analysis.csv     # Final merged dataset (2,864 rows × 62 cols)
-├── requirements.txt                    # Python dependencies
-├── .gitignore                          # Excludes large source CSVs
-└── README.md                           # This file
+├── requirements.txt                    # Python dependencies (incl. lightgbm, catboost)
+├── README.md                           # This file
+├── FINDINGS.md                         # Analytical insights & talking points
+└── .gitignore                          # Excludes large source CSVs
 ```
 
-## Key Engineered Features
+---
 
-| Feature | Description |
-|---------|-------------|
-| `building_age` | 2026 minus construction year |
-| `construction_era` | Binned into Pre-1850, 1850–1899, 1900–1919, Art Deco, Mid-Century, 1970+ |
-| `architect_prestige_score` | Based on how many buildings in the dataset share the same architect |
-| `rare_style_score` | Inverse frequency of architectural style (rarer style = higher score) |
-| `preservation_level` | Combined landmark + historic district + alteration status |
-| `is_landmark` / `in_historic_district` | Binary flags from the Landmark database |
+## Themes
 
-## Theme Options
+The sidebar includes three modern themes:
+- **Porcelain** — Apple light mode (default), system white + SF blue
+- **Graphite** — Apple dark mode, deep black + electric blue/purple gradient
+- **Aurora** — Linear-app vibe, midnight navy + cyan/violet
 
-The sidebar includes a theme switcher with three visual styles: Classic Dark, Light Minimal, and Warm Tone.
+---
+
+## Course context
+
+Final project for a Data Science course. The 5 graded pages (Business Case, Visualizations, Prediction with ≥ 5 models, Feature Importance, Hyperparameter Tuning with W&B) are all present; the Property Valuator (Page 6), Architect Leaderboard, Sankey, residual map, and live training UI are extras built on top of the base requirements.
