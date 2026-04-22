@@ -496,7 +496,7 @@ def wiki_lookup(query):
 # =================================================================
 def page1():
     title(
-        "Manhattan Heritage Valuation",
+        "Manhattan Property Valuation, Done Right",
         "Can architectural and preservation features make property price predictions more accurate?"
     )
 
