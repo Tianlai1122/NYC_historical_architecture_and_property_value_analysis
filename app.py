@@ -901,6 +901,65 @@ def page2():
                             labels={"is_altered": "Altered (1=Yes)", "price_per_sqft": "$/SqFt"})
             st.plotly_chart(fig, use_container_width=True)
 
+        # ── Time series small multiples ──
+        # One mini chart per era. Shows monthly sales rhythm by architectural period.
+        st.markdown("---")
+        st.markdown("### Monthly Sales Rhythm by Era")
+        st.caption("One mini-chart per construction era. Bars = number of sales that month, "
+                   "line = median sale price. Look for which eras saw the busiest months and "
+                   "where prices spiked.")
+
+        ts = viz.dropna(subset=["sale_month", "construction_era", "sale_price"]).copy()
+        ts = ts[ts["construction_era"].isin(era_order)]
+        # Aggregate by era + month
+        agg = (ts.groupby(["construction_era", "sale_month"])
+                 .agg(n_sales=("BBL", "count"),
+                      median_price=("sale_price", "median"))
+                 .reset_index())
+
+        # Two-row layout: 3 small charts per row
+        rows = [era_order[i:i + 3] for i in range(0, len(era_order), 3)]
+        for row in rows:
+            cols = st.columns(len(row))
+            for col, era in zip(cols, row):
+                era_data = agg[agg["construction_era"] == era].copy()
+                # Reindex on full 1-12 month range so empty months show as gaps not silence
+                full = pd.DataFrame({"sale_month": range(1, 13)})
+                era_data = full.merge(era_data, on="sale_month", how="left").fillna(0)
+
+                if era_data["n_sales"].sum() == 0:
+                    col.markdown(f"**{era}**")
+                    col.caption("No sales recorded.")
+                    continue
+
+                fig_t = go.Figure()
+                fig_t.add_trace(go.Bar(
+                    x=era_data["sale_month"], y=era_data["n_sales"],
+                    name="Sales",
+                    marker_color=T["accent"], opacity=0.55,
+                    hovertemplate="Month %{x}<br>%{y} sales<extra></extra>",
+                ))
+                fig_t.add_trace(go.Scatter(
+                    x=era_data["sale_month"], y=era_data["median_price"],
+                    name="Median Price",
+                    yaxis="y2", mode="lines+markers",
+                    line=dict(color=T["accent_soft"], width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate="Month %{x}<br>Median $%{y:,.0f}<extra></extra>",
+                ))
+                fig_t.update_layout(
+                    template=T["plotly"], height=240,
+                    title=dict(text=era, x=0.05, font=dict(size=13)),
+                    margin=dict(l=10, r=10, t=40, b=30),
+                    showlegend=False,
+                    xaxis=dict(title="", tickmode="linear", dtick=2,
+                               range=[0.5, 12.5]),
+                    yaxis=dict(title="Sales", showgrid=False),
+                    yaxis2=dict(title="", overlaying="y", side="right",
+                                showgrid=False, tickformat="$.2s"),
+                )
+                col.plotly_chart(fig_t, use_container_width=True)
+
         # ── Sankey: Era → Style → Price Tier ──
         # How architectural choices in each era translate to modern price brackets
         st.markdown("---")
