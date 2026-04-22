@@ -862,8 +862,10 @@ def page3():
     X_b = mdf[FB].values
     X_a = mdf[FALL].values
     y = mdf["log_price"].values
+    idx_all = np.arange(len(mdf))  # row index lookup so we can recover original rows
 
-    Xb_tr, Xb_te, y_tr, y_te = train_test_split(X_b, y, test_size=test_sz, random_state=rs)
+    Xb_tr, Xb_te, y_tr, y_te, _, te_idx = train_test_split(
+        X_b, y, idx_all, test_size=test_sz, random_state=rs)
     Xa_tr, Xa_te, _, _ = train_test_split(X_a, y, test_size=test_sz, random_state=rs)
 
     if do_scale:
@@ -1016,6 +1018,72 @@ def page3():
                   y0=y_te.min(), y1=y_te.max(),
                   line=dict(color="red", dash="dash"))
     st.plotly_chart(fig, use_container_width=True)
+
+    # ── Residual Analysis ──
+    # Where does the model agree with the market, and where doesn't it?
+    st.markdown("---")
+    st.markdown("### Where the Model Disagrees with the Market")
+    st.caption("Residuals = actual log-price minus predicted log-price. "
+               "Positive = market paid more than model expected (potentially undervalued by the model, or 'trophy premium'). "
+               "Negative = market paid less than model expected (potentially overvalued by the model, or distressed sale).")
+
+    # Recover the original row info for each test sample using te_idx
+    test_rows = mdf.iloc[te_idx].copy().reset_index(drop=True)
+    test_rows["actual_price"] = np.expm1(y_te)
+    test_rows["pred_price"] = np.expm1(yp)
+    test_rows["residual_log"] = y_te - yp
+    test_rows["residual_pct"] = (test_rows["actual_price"] / test_rows["pred_price"] - 1) * 100
+    test_rows["abs_dollar_diff"] = test_rows["actual_price"] - test_rows["pred_price"]
+
+    # Map: each property colored by residual sign and sized by magnitude
+    map_d = test_rows.dropna(subset=["latitude", "longitude"]).copy()
+    fig_map = px.scatter_mapbox(
+        map_d,
+        lat="latitude", lon="longitude",
+        color="residual_pct",
+        color_continuous_scale="RdBu_r", color_continuous_midpoint=0,
+        range_color=[-100, 100],
+        size=map_d["residual_pct"].abs().clip(0, 200),
+        size_max=22,
+        hover_name="display_name",
+        hover_data={
+            "actual_price": ":$,.0f", "pred_price": ":$,.0f",
+            "residual_pct": ":+.1f", "architect": True,
+            "construction_era": True,
+            "latitude": False, "longitude": False,
+        },
+        zoom=11.5, height=520, template=T["plotly"],
+        mapbox_style=T["map_style"],
+        labels={"residual_pct": "Residual %"},
+    )
+    fig_map.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+    st.plotly_chart(fig_map, use_container_width=True)
+
+    # ── Top 10 over/under priced ──
+    st.markdown("### Biggest Misses by the Model")
+    show_cols = ["display_name", "architect", "construction_era",
+                 "actual_price", "pred_price", "residual_pct", "neighborhood"]
+    rename = {
+        "display_name": "Property", "architect": "Architect",
+        "construction_era": "Era", "actual_price": "Actual",
+        "pred_price": "Predicted", "residual_pct": "Diff %",
+        "neighborhood": "Neighborhood",
+    }
+    fmt = {"Actual": "${:,.0f}", "Predicted": "${:,.0f}", "Diff %": "{:+.1f}%"}
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Top 10 'Trophy Premium'** (market paid more than model)")
+        st.caption("Likely heritage/architect/view premium not fully captured.")
+        top_under = (test_rows.sort_values("residual_pct", ascending=False)
+                              .head(10)[show_cols].rename(columns=rename))
+        st.dataframe(top_under.style.format(fmt), use_container_width=True, height=380)
+    with c2:
+        st.markdown("**Top 10 'Discount Sales'** (market paid less than model)")
+        st.caption("Likely distressed sales, internal transfers, or condition issues.")
+        top_over = (test_rows.sort_values("residual_pct", ascending=True)
+                             .head(10)[show_cols].rename(columns=rename))
+        st.dataframe(top_over.style.format(fmt), use_container_width=True, height=380)
 
 
 # =================================================================
