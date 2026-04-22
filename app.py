@@ -350,6 +350,26 @@ def flabel(var: str) -> str:
     return f"{pretty} ({var})" if pretty else var
 
 
+# Manhattan trivia shown one at a time during model training. Keeps the wait fun.
+MANHATTAN_FACTS = [
+    "🏙️ The Empire State Building (1931) was built in just 410 days.",
+    "🎨 Greenwich Village Historic District was designated in 1969 — NYC's largest.",
+    "🏛️ NYC has 38,000+ landmark buildings across all five boroughs.",
+    "🧱 'Brownstone' refers to a specific Triassic sandstone, mined in NJ.",
+    "💡 The Flatiron Building (1902) was one of the first steel-framed skyscrapers.",
+    "📜 The Landmarks Preservation Commission was created in 1965.",
+    "🏠 Pre-war buildings (built before WWII) often command 10-20% premiums.",
+    "🗽 The Plaza Hotel (1907) is a designated National Historic Landmark.",
+    "🌆 Manhattan has 114 historic districts protecting 33,000+ buildings.",
+    "🏗️ The first Manhattan landmark designated: Pieter Claesen Wyckoff House (1965).",
+    "✏️ McKim, Mead & White designed over 940 buildings in their career.",
+    "🏛️ Beaux-Arts style dominated Manhattan from 1885 to 1925.",
+    "🎭 Carnegie Hall (1891) was funded entirely by Andrew Carnegie himself.",
+    "⛪ St. Patrick's Cathedral took 21 years to build (1858-1879).",
+    "🌃 The Chrysler Building (1930) held 'world's tallest' for just 11 months.",
+]
+
+
 # ─────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────
@@ -940,8 +960,10 @@ def page3():
         "Gradient Boosting":  (GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=rs), False),
     }
     if HAS_LGBM:
+        # Cut from 300 to 150 trees + bump learning_rate to keep R2 the same
+        # Roughly halves training time on our 2.8K-row dataset
         MODELS["LightGBM"] = (
-            lgb.LGBMRegressor(n_estimators=300, num_leaves=31, learning_rate=0.05,
+            lgb.LGBMRegressor(n_estimators=150, num_leaves=31, learning_rate=0.08,
                               random_state=rs, n_jobs=-1, verbose=-1),
             False,
         )
@@ -975,17 +997,25 @@ def page3():
     trained_h = {}
     timings = {}
 
-    # Live progress: bar + per-model status line so user sees what's happening
+    # Pick a different fact per model so user has something fun to read
+    import random
+    facts_pool = random.sample(MANHATTAN_FACTS, k=min(len(sel), len(MANHATTAN_FACTS)))
+
+    # Live UI: progress bar + status + rotating fact + live leaderboard chart
     progress = st.progress(0, text="Starting…")
     status = st.empty()
+    fact_box = st.empty()
+    leaderboard_box = st.empty()
     total_t0 = time.perf_counter()
 
     for i, nm in enumerate(sel, start=1):
+        # Status line + a fun Manhattan fact while user waits
         status.markdown(
             f"&nbsp;&nbsp;**Training {i}/{len(sel)}: {nm}**"
             f" &middot; <span style='color:#6E6E73'>baseline + heritage</span>",
             unsafe_allow_html=True,
         )
+        fact_box.info(facts_pool[(i - 1) % len(facts_pool)])
         t0 = time.perf_counter()
 
         proto, needs_scale = MODELS[nm]
@@ -1006,12 +1036,35 @@ def page3():
         herit_rows[-1]["preds"] = rh["preds"]
         trained_h[nm] = mh
 
-        progress.progress(i / len(sel), text=f"Done {i}/{len(sel)} &middot; {nm} took {elapsed:.1f}s")
+        progress.progress(i / len(sel), text=f"Done {i}/{len(sel)} · {nm} took {elapsed:.1f}s")
+
+        # Live mini-leaderboard: refreshes after every model, shows current standings
+        live_lb = pd.DataFrame(herit_rows)[["Model", "R2_test"]].sort_values("R2_test", ascending=True)
+        is_winner = live_lb["R2_test"] == live_lb["R2_test"].max()
+        bar_colors = [T["accent"] if w else "#94a3b8" for w in is_winner]
+        live_fig = go.Figure(go.Bar(
+            x=live_lb["R2_test"], y=live_lb["Model"], orientation="h",
+            marker_color=bar_colors,
+            text=[f"{v:.3f}" for v in live_lb["R2_test"]],
+            textposition="outside",
+        ))
+        live_fig.update_layout(
+            template=T["plotly"], height=max(220, 38 * len(live_lb) + 80),
+            margin=dict(l=10, r=30, t=30, b=10),
+            xaxis_title="R² (Test, Heritage features)",
+            title=dict(text=f"🏆 Live Leaderboard — leader: {live_lb.iloc[-1]['Model']}",
+                       x=0.02, font=dict(size=14)),
+            xaxis=dict(range=[0, max(0.7, live_lb["R2_test"].max() * 1.1)]),
+        )
+        leaderboard_box.plotly_chart(live_fig, use_container_width=True, key=f"live_lb_{i}")
 
     total_elapsed = time.perf_counter() - total_t0
     progress.empty()
-    status.success(f"Trained {len(sel)} model{'s' if len(sel)>1 else ''} in {total_elapsed:.1f}s "
+    fact_box.empty()
+    status.success(f"✅ Trained {len(sel)} model{'s' if len(sel)>1 else ''} in {total_elapsed:.1f}s "
                    f"(slowest: {max(timings, key=timings.get)} at {max(timings.values()):.1f}s)")
+    # A tiny celebration so finishing feels satisfying
+    st.balloons()
 
     dfb = pd.DataFrame(base_rows).set_index("Model")
     dfh = pd.DataFrame(herit_rows).set_index("Model")
