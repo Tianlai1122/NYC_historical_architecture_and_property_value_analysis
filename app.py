@@ -1448,6 +1448,12 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
 
     st.markdown("---")
     st.markdown("### Results: Baseline vs Heritage-Enhanced")
+    st.caption(
+        "Higher **R² (Test)** = the model explains more of the price variation. "
+        "Lower **MAE / RMSE** = predictions are closer to the true sale price in dollars. "
+        "Linear-family models report large dollar errors because they predict in log-space "
+        "and a small log-error can blow up after `expm1`."
+    )
 
     c1, c2 = st.columns(2)
 
@@ -1458,30 +1464,38 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
         "RMSE_dollars",
         "Time(s)",
     ]
+    nice_cols = {
+        "R2_train": "R² (Train)",
+        "R2_test": "R² (Test)",
+        "MAE_dollars": "MAE ($)",
+        "RMSE_dollars": "RMSE ($)",
+        "Time(s)": "Time (s)",
+    }
+    fmt_spec = {
+        "R² (Train)": "{:.4f}",
+        "R² (Test)": "{:.4f}",
+        "MAE ($)": "${:,.0f}",
+        "RMSE ($)": "${:,.0f}",
+        "Time (s)": "{:.2f}",
+    }
 
     with c1:
         st.markdown("**Baseline Model — structural variables only**")
         st.dataframe(
-            dfb[fmt_cols].style.format({
-                "R2_train": "{:.4f}",
-                "R2_test": "{:.4f}",
-                "MAE_dollars": "${:,.0f}",
-                "RMSE_dollars": "${:,.0f}",
-                "Time(s)": "{:.2f}",
-            }),
+            dfb[fmt_cols].rename(columns=nice_cols).style
+                .highlight_max(subset=["R² (Test)"], color="#667eea")
+                .highlight_min(subset=["MAE ($)", "RMSE ($)"], color="#2ecc71")
+                .format(fmt_spec),
             use_container_width=True,
         )
 
     with c2:
         st.markdown("**Heritage-Enhanced Model — baseline + heritage variables**")
         st.dataframe(
-            dfh[fmt_cols].style.format({
-                "R2_train": "{:.4f}",
-                "R2_test": "{:.4f}",
-                "MAE_dollars": "${:,.0f}",
-                "RMSE_dollars": "${:,.0f}",
-                "Time(s)": "{:.2f}",
-            }),
+            dfh[fmt_cols].rename(columns=nice_cols).style
+                .highlight_max(subset=["R² (Test)"], color="#667eea")
+                .highlight_min(subset=["MAE ($)", "RMSE ($)"], color="#2ecc71")
+                .format(fmt_spec),
             use_container_width=True,
         )
 
