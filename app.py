@@ -45,7 +45,7 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Manhattan Heritage Valuation",
-    page_icon="🏛️",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -391,15 +391,15 @@ def flabel(var):
 
 
 MANHATTAN_FACTS = [
-    "🏙️ The Empire State Building was built in just 410 days.",
-    "🎨 Greenwich Village Historic District was designated in 1969.",
-    "🏛️ The Landmarks Preservation Commission was created in 1965.",
-    "🧱 Brownstone refers to a specific sandstone historically used in New York townhouses.",
-    "💡 The Flatiron Building was completed in 1902.",
-    "🌆 Manhattan contains many protected historic districts and landmark buildings.",
-    "🏗️ Beaux-Arts and Art Deco styles are deeply associated with Manhattan architecture.",
-    "⛪ St. Patrick's Cathedral took more than two decades to complete.",
-    "🌃 The Chrysler Building briefly held the title of world’s tallest building.",
+    "Did you know? The Empire State Building was built in just 410 days.",
+    "Did you know? Greenwich Village Historic District was designated in 1969.",
+    "Did you know? The Landmarks Preservation Commission was created in 1965.",
+    "Did you know? Brownstone refers to a specific sandstone historically used in New York townhouses.",
+    "Did you know? The Flatiron Building was completed in 1902.",
+    "Did you know? Manhattan contains many protected historic districts and landmark buildings.",
+    "Did you know? Beaux-Arts and Art Deco styles are deeply associated with Manhattan architecture.",
+    "Did you know? St. Patrick's Cathedral took more than two decades to complete.",
+    "Did you know? The Chrysler Building briefly held the title of world's tallest building.",
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -1410,7 +1410,7 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
             margin=dict(l=10, r=30, t=30, b=10),
             xaxis_title="R² Test Score",
             title=dict(
-                text=f"🏆 Live Leaderboard — leader: {live_lb.iloc[-1]['Model']}",
+                text=f"Live Leaderboard — leader: {live_lb.iloc[-1]['Model']}",
                 x=0.02,
                 font=dict(size=14),
             ),
@@ -1429,11 +1429,9 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
     fact_box.empty()
 
     status.success(
-        f"✅ Trained {len(sel)} model{'s' if len(sel) > 1 else ''} in {total_elapsed:.1f}s "
+        f"Trained {len(sel)} model{'s' if len(sel) > 1 else ''} in {total_elapsed:.1f}s "
         f"(slowest: {max(timings, key=timings.get)} at {max(timings.values()):.1f}s)"
     )
-
-    st.balloons()
 
     dfb = pd.DataFrame(base_rows).set_index("Model")
     dfh = pd.DataFrame(herit_rows).set_index("Model")
@@ -1865,7 +1863,7 @@ def page5():
         "Testing different model settings to improve prediction performance"
     )
 
-    with st.expander("📚 What is hyperparameter tuning?", expanded=False):
+    with st.expander("What is hyperparameter tuning?", expanded=False):
         st.markdown("""
 Hyperparameters are the model settings chosen before training.  
 For example, a random forest needs to know how many trees to use, and a decision tree needs to know how deep it can grow.
@@ -1950,7 +1948,7 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         ),
     }
     if model_name in MODEL_TIPS:
-        st.caption("💡 " + MODEL_TIPS[model_name])
+        st.caption("Tip: " + MODEL_TIPS[model_name])
 
     grid = []
 
@@ -2285,7 +2283,7 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         ]
 
         st.success(
-            f"🏆 Best: R² = {best['r2_test']:.4f}, "
+            f"Best: R² = {best['r2_test']:.4f}, "
             f"MAE = ${best['mae_dollars']:,.0f}, "
             f"RMSE = ${best['rmse_dollars']:,.0f}. "
             f"Params: {dict(best[pcols])}"

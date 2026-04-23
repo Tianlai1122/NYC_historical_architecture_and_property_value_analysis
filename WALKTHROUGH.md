@@ -178,10 +178,10 @@ Requires that Page 3 trained at least one model (cached in session state).
 ## Page 5 — Hyperparameter Tuning
 
 ### Layout
-- Top expander: "📚 What is hyperparameter tuning?" — beginner intro.
+- Top expander: "What is hyperparameter tuning?" — beginner intro.
 - Model selector with a tooltip explaining what each family tunes.
 - Test-size slider with tooltip.
-- For each model, a **per-model tip caption** ("💡 Alpha controls regularization strength…") so newcomers understand what knobs to turn without leaving the page.
+- For each model, a **per-model tip caption** ("Tip: Alpha controls regularization strength…") so newcomers understand what knobs to turn without leaving the page.
 - The grid of multiselects expands based on the chosen model.
 - Total-experiments counter.
 - Optional W&B section with API key input, project/entity fields, and a checkbox tooltip.
@@ -194,7 +194,7 @@ Requires that Page 3 trained at least one model (cached in session state).
 ### Results
 - Sortable dataframe with friendly headers (R² (Train), R² (Test), MAE ($), RMSE ($)) and a one-line caption.
 - Best test R² cell highlighted blue, lowest dollar errors highlighted green.
-- "🏆 Best:" success banner with the winning hyperparameters.
+- "Best:" success banner with the winning hyperparameters.
 - A line or bar chart of R² vs the first hyperparameter dimension to spot trends.
 
 ### Observation points
