@@ -2014,8 +2014,12 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
     st.markdown("---")
     st.markdown("### Weights & Biases Logging")
 
-    use_wb = st.checkbox("Log experiments to W&B", False)
-    wb_proj = "manhattan-heritage-pricing"
+    use_wb = st.checkbox(
+        "Log experiments to W&B",
+        False,
+        help="Track every grid-search run in your Weights & Biases dashboard for later comparison.",
+    )
+    wb_proj = "Manhattan-heritage-property-analysis-app"
     wb_entity = ""
     wb_key = ""
 
@@ -2023,7 +2027,7 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         wc1, wc2 = st.columns(2)
 
         with wc1:
-            wb_proj = st.text_input("Project name", "manhattan-heritage-pricing")
+            wb_proj = st.text_input("Project name", "Manhattan-heritage-property-analysis-app")
 
         with wc2:
             wb_entity = st.text_input("Entity / team optional", "")
@@ -2181,16 +2185,28 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         res_df = pd.DataFrame(results).sort_values("r2_test", ascending=False)
 
         st.markdown("### Results")
+        st.caption(
+            "Sorted by Test R² (best on top). "
+            "Blue cell = best test score, green = lowest dollar error."
+        )
+
+        nice = {
+            "r2_train": "R² (Train)",
+            "r2_test": "R² (Test)",
+            "mae_dollars": "MAE ($)",
+            "rmse_dollars": "RMSE ($)",
+        }
+        display_df = res_df.rename(columns=nice)
 
         st.dataframe(
-            res_df.style
-            .highlight_max(subset=["r2_test"], color="#667eea")
-            .highlight_min(subset=["rmse_dollars", "mae_dollars"], color="#2ecc71")
+            display_df.style
+            .highlight_max(subset=["R² (Test)"], color="#667eea")
+            .highlight_min(subset=["RMSE ($)", "MAE ($)"], color="#2ecc71")
             .format({
-                "r2_train": "{:.4f}",
-                "r2_test": "{:.4f}",
-                "mae_dollars": "${:,.0f}",
-                "rmse_dollars": "${:,.0f}",
+                "R² (Train)": "{:.4f}",
+                "R² (Test)": "{:.4f}",
+                "MAE ($)": "${:,.0f}",
+                "RMSE ($)": "${:,.0f}",
             }),
             use_container_width=True,
         )
@@ -2203,7 +2219,7 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         ]
 
         st.success(
-            f"Best: R² = {best['r2_test']:.4f}, "
+            f"🏆 Best: R² = {best['r2_test']:.4f}, "
             f"MAE = ${best['mae_dollars']:,.0f}, "
             f"RMSE = ${best['rmse_dollars']:,.0f}. "
             f"Params: {dict(best[pcols])}"
