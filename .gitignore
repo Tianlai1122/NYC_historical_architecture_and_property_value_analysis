@@ -28,3 +28,6 @@ wandb/
 
 # Resolved artifacts
 *.resolved
+
+# CatBoost training artifacts
+catboost_info/
