@@ -1892,13 +1892,65 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
     c1, c2 = st.columns(2)
 
     with c1:
-        model_name = st.selectbox("Model", tune_choices)
+        model_name = st.selectbox(
+            "Model",
+            tune_choices,
+            help=(
+                "Pick which family to tune. Linear models (Ridge/Lasso/Elastic Net) "
+                "tune regularization strength. Tree models tune depth and "
+                "ensemble size. Boosting models (LightGBM, GBR) also tune "
+                "learning rate."
+            ),
+        )
 
     with c2:
-        test_sz = st.slider("Test size", 0.1, 0.4, 0.2, 0.05, key="hp_ts")
+        test_sz = st.slider(
+            "Test size",
+            0.1, 0.4, 0.2, 0.05,
+            key="hp_ts",
+            help="Fraction of rows held out for evaluation. 0.2 = 80/20 split.",
+        )
 
     st.markdown("---")
     st.markdown("### Hyperparameter Grid")
+
+    MODEL_TIPS = {
+        "Ridge Regression": (
+            "**Alpha** controls how strongly large coefficients are penalised. "
+            "Small alpha → behaves like plain Linear Regression. "
+            "Large alpha → coefficients shrink toward 0, model gets simpler."
+        ),
+        "Lasso Regression": (
+            "**Alpha** is the L1 penalty. Lasso can drop weak features by setting "
+            "their coefficient exactly to 0, so a larger alpha = a sparser model."
+        ),
+        "Elastic Net": (
+            "Combines L1 (Lasso) and L2 (Ridge). **Alpha** = total penalty strength, "
+            "**L1 ratio** = how much of that penalty is L1 vs L2 (1 = pure Lasso, 0 = pure Ridge)."
+        ),
+        "Decision Tree": (
+            "**Max depth** caps how many questions the tree can ask in a row. "
+            "Deeper trees fit training data more tightly but risk overfitting. "
+            "**Min samples split** prevents tiny branches by refusing to split a node "
+            "with fewer than N rows."
+        ),
+        "Random Forest": (
+            "**N estimators** = how many trees to average. More trees → smoother predictions "
+            "but slower training. **Max depth** limits each tree's complexity."
+        ),
+        "Gradient Boosting": (
+            "Boosting builds trees sequentially, each one fixing the previous one's mistakes. "
+            "**Learning rate** controls how much each tree corrects (smaller = safer but needs more trees). "
+            "**N estimators** = how many trees in total."
+        ),
+        "LightGBM": (
+            "Fast, leaf-wise gradient boosting. **N estimators** = number of trees, "
+            "**Num leaves** = tree complexity (more leaves = more flexible, more overfit risk), "
+            "**Learning rate** = step size per tree."
+        ),
+    }
+    if model_name in MODEL_TIPS:
+        st.caption("💡 " + MODEL_TIPS[model_name])
 
     grid = []
 
