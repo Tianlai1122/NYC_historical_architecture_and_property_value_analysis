@@ -1,3 +1,14 @@
+---
+title: Manhattan Heritage Property Valuation
+emoji: 🏛
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.39.0
+app_file: app.py
+pinned: false
+---
+
 # NYC Historical Architecture & Property Value Analysis
 
 A Streamlit app that asks a single question:
@@ -38,13 +49,13 @@ Best test R² on log-price (full feature set, 80/20 split): **LightGBM 0.618 / C
 
 Three NYC open datasets merged on **BBL (Borough-Block-Lot)**:
 
-| Dataset | Provides |
-|---|---|
-| NYC Rolling Sales | Sale price, sale date, building class |
-| MapPLUTO | Building dimensions, zoning, GPS, tax assessment, FAR |
-| Landmarks Database | Architect, style, material, historic district, alteration year |
+| Dataset | Source | Information |
+|---|---|---|
+| **Primary Land Use Tax Lot Output (PLUTO)** | [NYC OpenData](https://data.cityofnewyork.us/City-Government/Primary-Land-Use-Tax-Lot-Output-PLUTO-/64uk-42ks/about_data) | Building dimensions, lot size, gross square footage, year built, units, land use, zoning, FAR, and tax assessment |
+| **NYC Citywide Rolling Calendar Sales** | [NYC OpenData](https://data.cityofnewyork.us/dataset/NYC-Citywide-Rolling-Calendar-Sales/usep-8jbt/about_data) | Sale prices, sale dates, building class, and other transactional data |
+| **Individual Landmark and Historic District Building Database** | [NYC OpenData](https://data.cityofnewyork.us/Housing-Development/Individual-Landmark-and-Historic-District-Building/7mgd-s57w) / [Data.gov](https://catalog.data.gov/dataset/individual-landmark-and-historic-district-building-database) | Architect, architectural style, primary facade material, landmark designation, historic district membership, and alteration history |
 
-After merging and filtering for sales ≥ $100K: **2,864 properties × 62 columns**.
+After merging on BBL and filtering for sales ≥ $100K: **2,864 properties × 62 columns**.
 
 ### Engineered features
 
