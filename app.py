@@ -6,34 +6,38 @@ Central Question:
 Can heritage-related variables improve the prediction of Manhattan property sale prices?
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
 import copy
+import random
 import time
-import matplotlib.pyplot as plt
+import warnings
+
 import matplotlib.colors as mcolors
-import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import pydeck as pdk
 import requests
+import seaborn as sns
+import streamlit as st
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-import warnings
 
 try:
     import lightgbm as lgb
+
     HAS_LGBM = True
 except ImportError:
     HAS_LGBM = False
 
 try:
     from catboost import CatBoostRegressor
+
     HAS_CATBOOST = True
 except ImportError:
     HAS_CATBOOST = False
@@ -45,7 +49,7 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Manhattan Heritage Valuation",
-    page_icon=None,
+    page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -129,7 +133,8 @@ page = st.sidebar.radio(
 # ─────────────────────────────────────────────────────────────
 # CSS
 # ─────────────────────────────────────────────────────────────
-st.markdown(f"""
+st.markdown(
+    f"""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
@@ -162,7 +167,7 @@ st.markdown(f"""
     color: {T["muted"]};
     margin-bottom: 1.6rem;
     font-weight: 400;
-    max-width: 52rem;
+    max-width: 54rem;
   }}
 
   .card {{
@@ -221,7 +226,9 @@ st.markdown(f"""
     padding: 0.3rem 0.9rem !important;
   }}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ─────────────────────────────────────────────────────────────
 # DATA
@@ -238,19 +245,15 @@ def load_data():
         "style_secondary",
         "material_secondary",
     ]
-
     for col in zero_cols:
         if col in d.columns:
             d[col] = d[col].astype(str).replace("0", "")
 
-    d["building_name"] = d["building_name"].fillna("").astype(str)
-    d["address"] = d["address"].fillna("").astype(str)
+    for col in ["building_name", "address", "architect", "style_primary", "material_primary", "historic_district"]:
+        if col in d.columns:
+            d[col] = d[col].fillna("").astype(str)
 
-    d["display_name"] = d["building_name"].where(
-        d["building_name"].str.len() > 0,
-        d["address"]
-    )
-
+    d["display_name"] = d["building_name"].where(d["building_name"].str.len() > 0, d["address"])
     return d
 
 
@@ -264,7 +267,7 @@ st.sidebar.caption(
 )
 
 # ─────────────────────────────────────────────────────────────
-# FEATURE SETS
+# FEATURE SETS USED IN THE PREDICTION MODEL
 # ─────────────────────────────────────────────────────────────
 BASELINE = [
     "gross_sqft",
@@ -293,10 +296,6 @@ BASELINE = [
 HERITAGE = [
     "building_age",
     "construction_era_encoded",
-    "architect_prestige_score",
-    "architect_building_count",
-    "rare_style_score",
-    "style_frequency",
     "is_landmark",
     "in_historic_district",
     "is_altered",
@@ -305,11 +304,13 @@ HERITAGE = [
     "style_primary_encoded",
 ]
 
+
 @st.cache_data
 def prepare_features(dataframe):
     d = dataframe[dataframe["sale_price"] >= 100_000].copy()
     d["log_price"] = np.log1p(d["sale_price"])
 
+    # Encode only the categorical variables needed by the model
     cat_cols = [
         "construction_era",
         "material_primary",
@@ -318,30 +319,31 @@ def prepare_features(dataframe):
         "building_class_code",
     ]
 
+    encoders = {}
     for cat in cat_cols:
         if cat in d.columns:
             le = LabelEncoder()
-            d[f"{cat}_encoded"] = le.fit_transform(
-                d[cat].fillna("Unknown").astype(str)
-            )
+            d[f"{cat}_encoded"] = le.fit_transform(d[cat].fillna("Unknown").astype(str))
+            encoders[cat] = le
 
+    # Modeling choice: missing unit counts are treated as zero
     for c in ["residential_units", "commercial_units", "total_units"]:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0)
 
-    all_f = BASELINE + HERITAGE
-    avail = [f for f in all_f if f in d.columns]
+    all_features = BASELINE + HERITAGE
+    available = [f for f in all_features if f in d.columns]
 
-    d[avail] = d[avail].apply(pd.to_numeric, errors="coerce")
-    d = d.dropna(subset=avail, thresh=len(avail) - 6)
+    d[available] = d[available].apply(pd.to_numeric, errors="coerce")
+    d = d.dropna(subset=available, thresh=len(available) - 6)
 
-    for c in avail:
+    for c in available:
         d[c] = d[c].fillna(d[c].median())
 
-    return d, [f for f in BASELINE if f in avail], [f for f in HERITAGE if f in avail]
+    return d, [f for f in BASELINE if f in available], [f for f in HERITAGE if f in available], encoders
 
 
-mdf, FB, FH = prepare_features(df)
+mdf, FB, FH, LABEL_ENCODERS = prepare_features(df)
 FALL = FB + FH
 
 # ─────────────────────────────────────────────────────────────
@@ -366,46 +368,277 @@ FRIENDLY_LABELS = {
     "resid_far": "Residential FAR Cap",
     "comm_far": "Commercial FAR Cap",
     "facil_far": "Facility FAR Cap",
-    "zoning_encoded": "Zoning District",
-    "building_class_code_encoded": "Building Class",
+    "zoning_encoded": "Zoning District (Encoded)",
+    "building_class_code_encoded": "Building Class (Encoded)",
     "sale_month": "Sale Month",
     "sale_price": "Sale Price",
-    "price_per_sqft": "Price per Sqft",
+    "price_per_sqft": "Price per SqFt",
     "building_age": "Building Age",
-    "construction_era_encoded": "Construction Era",
-    "architect_prestige_score": "Architect Prestige Score",
-    "architect_building_count": "Architect Portfolio Size",
-    "rare_style_score": "Rare Style Score",
-    "style_frequency": "Style Frequency",
+    "construction_era_encoded": "Construction Era (Encoded)",
     "is_landmark": "Individual Landmark",
     "in_historic_district": "In Historic District",
     "is_altered": "Has Been Altered",
     "years_since_alteration": "Years Since Alteration",
-    "material_primary_encoded": "Primary Facade Material",
-    "style_primary_encoded": "Primary Architectural Style",
+    "material_primary_encoded": "Primary Facade Material (Encoded)",
+    "style_primary_encoded": "Primary Architectural Style (Encoded)",
 }
 
-def flabel(var):
-    pretty = FRIENDLY_LABELS.get(var)
-    return f"{pretty} ({var})" if pretty else var
-
+VARIABLE_DOCS = [
+    {
+        "Model": "Baseline",
+        "Variable": "gross_sqft",
+        "Meaning": "Gross building floor area used by the model.",
+        "Source": "Sales, fallback to PLUTO",
+        "Type": "Semi-engineered",
+        "Engineering": "Starts from Sales 'GROSS SQUARE FEET'; when missing, falls back to PLUTO 'bldgarea'; zeros treated as missing.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "land_sqft",
+        "Meaning": "Land area for the property lot.",
+        "Source": "Sales, fallback to PLUTO",
+        "Type": "Semi-engineered",
+        "Engineering": "Starts from Sales 'LAND SQUARE FEET'; when missing, falls back to PLUTO 'lotarea'; zeros treated as missing.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "num_floors",
+        "Meaning": "Number of floors in the building.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "lot_area",
+        "Meaning": "Lot area from PLUTO.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "lot_depth",
+        "Meaning": "Depth of the lot.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "lot_frontage",
+        "Meaning": "Street frontage of the lot.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "building_depth",
+        "Meaning": "Depth of the building footprint.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "building_frontage",
+        "Meaning": "Street frontage of the building.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "residential_units",
+        "Meaning": "Number of residential units.",
+        "Source": "Sales",
+        "Type": "Cleaned for modeling",
+        "Engineering": "Converted to numeric; missing values filled with 0 in app.py for modeling.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "commercial_units",
+        "Meaning": "Number of commercial units.",
+        "Source": "Sales",
+        "Type": "Cleaned for modeling",
+        "Engineering": "Converted to numeric; missing values filled with 0 in app.py for modeling.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "total_units",
+        "Meaning": "Total recorded unit count.",
+        "Source": "Sales",
+        "Type": "Cleaned for modeling",
+        "Engineering": "Converted to numeric; missing values filled with 0 in app.py for modeling.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "assess_total",
+        "Meaning": "Total assessed value.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "assess_land",
+        "Meaning": "Land-only assessed value.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "exempt_total",
+        "Meaning": "Total tax-exempt assessed value.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "built_far",
+        "Meaning": "Built floor-area ratio.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "resid_far",
+        "Meaning": "Residential FAR cap.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "comm_far",
+        "Meaning": "Commercial FAR cap.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "facil_far",
+        "Meaning": "Facility FAR cap.",
+        "Source": "PLUTO",
+        "Type": "Raw cleaned",
+        "Engineering": "Converted to numeric.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "zoning_encoded",
+        "Meaning": "Zoning district transformed into numeric labels for modeling.",
+        "Source": "PLUTO zonedist1",
+        "Type": "Engineered in app.py",
+        "Engineering": "Original text zoning district is label-encoded in app.py so the model can use it.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "building_class_code_encoded",
+        "Meaning": "Building class code transformed into numeric labels for modeling.",
+        "Source": "Sales building class at present",
+        "Type": "Engineered in app.py",
+        "Engineering": "Original text class code is label-encoded in app.py so the model can use it.",
+    },
+    {
+        "Model": "Baseline",
+        "Variable": "sale_month",
+        "Meaning": "Calendar month of sale, used as a timing control.",
+        "Source": "Derived from sale_date",
+        "Type": "Engineered in prepare_data.py",
+        "Engineering": "Created from the sale date with sale_date.dt.month.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "building_age",
+        "Meaning": "Approximate age of the building at the time of analysis.",
+        "Source": "Derived from construction_year",
+        "Type": "Engineered in prepare_data.py",
+        "Engineering": "Computed as 2026 - construction_year after construction_year was assembled from Landmark Date_Low with fallback to PLUTO yearbuilt.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "construction_era_encoded",
+        "Meaning": "Construction period bucket transformed into numeric labels for modeling.",
+        "Source": "Derived from construction_year",
+        "Type": "Engineered in prepare_data.py and app.py",
+        "Engineering": "Construction year is bucketed into eras like Pre-1850, 1850–1899, 1900–1919, 1920–1939, 1940–1969, and 1970+; that era label is then encoded in app.py.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "is_landmark",
+        "Meaning": "Whether the property is coded as an individual landmark.",
+        "Source": "Landmark database",
+        "Type": "Engineered in prepare_data.py",
+        "Engineering": "Built as a binary flag from LM_Orig and LM_New.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "in_historic_district",
+        "Meaning": "Whether the property is in a historic district.",
+        "Source": "Landmark database",
+        "Type": "Engineered in prepare_data.py",
+        "Engineering": "Built as a binary flag: 1 when Hist_Dist is non-empty, otherwise 0.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "is_altered",
+        "Meaning": "Whether the building shows recorded alteration history.",
+        "Source": "Landmark + PLUTO",
+        "Type": "Engineered in prepare_data.py",
+        "Engineering": "Built as a binary flag from Altered and alteration_year information.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "years_since_alteration",
+        "Meaning": "How long ago the most recent alteration occurred.",
+        "Source": "Derived from alteration_year",
+        "Type": "Engineered in prepare_data.py",
+        "Engineering": "Computed as 2026 - alteration_year, with impossible negatives set to missing.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "material_primary_encoded",
+        "Meaning": "Primary facade material transformed into numeric labels for modeling.",
+        "Source": "Landmark database Mat_Prim",
+        "Type": "Engineered in app.py",
+        "Engineering": "The original text material category is label-encoded in app.py.",
+    },
+    {
+        "Model": "Heritage",
+        "Variable": "style_primary_encoded",
+        "Meaning": "Primary architectural style transformed into numeric labels for modeling.",
+        "Source": "Landmark database Style_Prim",
+        "Type": "Engineered in app.py",
+        "Engineering": "The original text style category is label-encoded in app.py.",
+    },
+]
 
 MANHATTAN_FACTS = [
-    "Did you know? The Empire State Building was built in just 410 days.",
-    "Did you know? Greenwich Village Historic District was designated in 1969.",
-    "Did you know? The Landmarks Preservation Commission was created in 1965.",
-    "Did you know? Brownstone refers to a specific sandstone historically used in New York townhouses.",
-    "Did you know? The Flatiron Building was completed in 1902.",
-    "Did you know? Manhattan contains many protected historic districts and landmark buildings.",
-    "Did you know? Beaux-Arts and Art Deco styles are deeply associated with Manhattan architecture.",
-    "Did you know? St. Patrick's Cathedral took more than two decades to complete.",
-    "Did you know? The Chrysler Building briefly held the title of world's tallest building.",
+    "🏙️ The Empire State Building was built in just 410 days.",
+    "🎨 Greenwich Village Historic District was designated in 1969.",
+    "🏛️ The Landmarks Preservation Commission was created in 1965.",
+    "🧱 Brownstone refers to a specific sandstone historically used in New York townhouses.",
+    "💡 The Flatiron Building was completed in 1902.",
+    "🌆 Manhattan contains many protected historic districts and landmark buildings.",
+    "🏗️ Beaux-Arts and Art Deco styles are deeply associated with Manhattan architecture.",
+    "⛪ St. Patrick's Cathedral took more than two decades to complete.",
+    "🌃 The Chrysler Building briefly held the title of world’s tallest building.",
 ]
 
 # ─────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────
-def title(text, sub=""):
+def flabel(var: str) -> str:
+    pretty = FRIENDLY_LABELS.get(var)
+    return f"{pretty} ({var})" if pretty else var
+
+
+def title(text: str, sub: str = ""):
     st.markdown(f'<p class="page-title">{text}</p>', unsafe_allow_html=True)
     if sub:
         st.markdown(f'<p class="page-subtitle">{sub}</p>', unsafe_allow_html=True)
@@ -438,12 +671,11 @@ def train_eval(model, Xtr, ytr, Xte, yte):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def wiki_lookup(query):
+def wiki_lookup(query: str):
     if not query or not query.strip():
         return None
-
     try:
-        s = requests.get(
+        search_resp = requests.get(
             "https://en.wikipedia.org/w/api.php",
             params={
                 "action": "query",
@@ -455,13 +687,13 @@ def wiki_lookup(query):
             timeout=4,
         ).json()
 
-        hits = s.get("query", {}).get("search", [])
+        hits = search_resp.get("query", {}).get("search", [])
         if not hits:
             return None
 
         page_title = hits[0]["title"]
 
-        p = requests.get(
+        page_resp = requests.get(
             "https://en.wikipedia.org/w/api.php",
             params={
                 "action": "query",
@@ -476,7 +708,7 @@ def wiki_lookup(query):
             timeout=4,
         ).json()
 
-        page = next(iter(p.get("query", {}).get("pages", {}).values()), {})
+        page = next(iter(page_resp.get("query", {}).get("pages", {}).values()), {})
         img = page.get("original", {}).get("source")
         extract = (page.get("extract") or "").strip()
 
@@ -486,9 +718,13 @@ def wiki_lookup(query):
             "extract": extract[:500] + ("..." if len(extract) > 500 else ""),
             "image": img,
         }
-
     except Exception:
         return None
+
+
+def variable_dictionary_df(model_type: str):
+    rows = [r for r in VARIABLE_DOCS if r["Model"] == model_type]
+    return pd.DataFrame(rows)[["Variable", "Meaning", "Source", "Type", "Engineering"]]
 
 
 # =================================================================
@@ -496,112 +732,119 @@ def wiki_lookup(query):
 # =================================================================
 def page1():
     title(
-        "Manhattan Property Valuation, Done Right",
+        "Manhattan Heritage Valuation",
         "Can architectural and preservation features make property price predictions more accurate?"
     )
 
     st.markdown("---")
-
     st.markdown("### Research Question")
-    st.markdown("""
+    st.markdown(
+        """
 **Can heritage-related variables improve the prediction of Manhattan property sale prices?**
 
-This project uses a predictive modeling approach. It does not try to prove that historic preservation directly causes higher property values. Instead, it asks whether architectural and preservation-related information can help machine-learning models predict sale prices more accurately.
+This project is predictive rather than causal.  
+It does **not** try to prove that heritage status directly causes higher prices.  
+Instead, it compares two models:
 
-The project compares two model types:
+- a **Baseline Model** built from standard real-estate variables
+- a **Heritage-Enhanced Model** that adds architectural and preservation variables
 
-1. **Baseline Model** — uses standard real-estate variables.
-2. **Heritage-Enhanced Model** — uses the same baseline variables plus architectural and preservation variables.
-
-If the heritage-enhanced model performs better, this suggests that heritage-related features contain useful predictive information beyond standard property characteristics.
-    """)
+If the heritage-enhanced model performs better, then heritage-related information contributes useful predictive signal.
+"""
+    )
 
     c1, c2 = st.columns(2)
-
     with c1:
         st.markdown("#### Baseline Model")
-        st.markdown("""
-The baseline model represents a standard real-estate valuation approach. It uses physical, financial, and zoning-related variables, including:
-
-- Gross square footage
-- Lot size
-- Number of floors
-- Unit count
-- Assessment value
-- Building class
-- Zoning district
-- FAR variables
-
-These variables describe the property mainly as a real-estate asset.
-        """)
-
+        st.markdown(
+            """
+The baseline model treats each property mainly as a real-estate asset.  
+It uses size, lot dimensions, unit counts, assessments, FAR, zoning, building class, and sale timing.
+"""
+        )
     with c2:
         st.markdown("#### Heritage-Enhanced Model")
-        st.markdown("""
-The heritage-enhanced model keeps all baseline variables and adds architectural and preservation-related features, including:
+        st.markdown(
+            """
+The heritage-enhanced model keeps every baseline variable and adds a smaller set of heritage features:
 
-- Construction era
-- Building age
-- Architect
-- Architectural style
-- Facade material
-- Landmark status
-- Historic district membership
-- Alteration history
-- Style rarity
-- Architect portfolio size
-
-These variables describe the property not only as a physical asset, but also as a historic and architectural object.
-        """)
+- building age
+- construction era
+- landmark status
+- historic district status
+- alteration status
+- years since alteration
+- facade material
+- architectural style
+"""
+        )
 
     st.markdown("---")
-
-    st.markdown("### Why This Matters")
-    st.markdown("""
-Real estate prices are often modeled using measurable structural variables. However, in Manhattan, many properties are valued not only for their size or location, but also for their architectural identity and historic character.
-
-This project tests whether adding heritage-related variables improves prediction accuracy. A better-performing heritage-enhanced model would suggest that architectural and preservation features provide additional information that standard real-estate features alone may miss.
-    """)
-
-    st.info("""
-**Important limitation:** This project is predictive, not causal.  
-A higher-performing heritage-enhanced model does not prove that landmark status or architectural style directly causes higher sale prices. It only shows that heritage-related variables are useful signals for predicting sale prices within the dataset.
-    """)
-
-    st.markdown("---")
-
     st.markdown("### Data Sources")
     d1, d2, d3 = st.columns(3)
 
     with d1:
         st.markdown("**NYC Rolling Sales**")
-        st.caption("Sale prices, dates, building class, square footage.")
+        st.caption("Sale price, date, square footage, unit counts, building class, neighborhood.")
         st.metric("Records", "18,817")
 
     with d2:
         st.markdown("**MapPLUTO**")
-        st.caption("Structural features, zoning, GPS coordinates, assessments.")
+        st.caption("Lot dimensions, building dimensions, FAR, zoning, assessments, coordinates.")
         st.metric("Records", "42,600")
 
     with d3:
         st.markdown("**Landmark Database**")
-        st.caption("Architect, style, material, historic district, alteration history.")
+        st.caption("Architectural style, material, architect, landmark flags, historic district information.")
         st.metric("Records", "14,610")
 
-    st.markdown("""
-The datasets are merged using **BBL**, which stands for Borough-Block-Lot, New York City's property identifier.
-The final dataset focuses on Manhattan properties with matching sales, PLUTO, and heritage-related records.
-    """)
+    st.markdown(
+        """
+The merged CSV was built by joining the three Manhattan-only datasets on **BBL**  
+(Borough-Block-Lot, New York City's parcel identifier).
 
-    cards([
-        ("Final merged records", f"{len(df):,}"),
-        ("Engineered features", f"{len(df.columns)}"),
-        ("Unique architects", f"{df['architect'].nunique()}"),
-        ("With GPS coordinates", f"{df.dropna(subset=['latitude']).shape[0]:,}"),
-    ])
+The app does **not** invent outside data.  
+However, several columns were **engineered** from raw fields, such as binary landmark indicators, construction era bins, sale month, building age, years since alteration, and encoded categorical variables.
+"""
+    )
+
+    cards(
+        [
+            ("Final merged records", f"{len(df):,}"),
+            ("Columns in merged CSV", f"{len(df.columns)}"),
+            ("Rows used for modeling", f"{len(mdf):,}"),
+            ("Model heritage variables", f"{len(FH)}"),
+        ]
+    )
 
     st.markdown("---")
+    st.markdown("### What happens in the data preparation pipeline?")
+    st.markdown(
+        """
+1. Read three raw datasets: Landmark, Sales, and PLUTO.  
+2. Filter each dataset to Manhattan only.  
+3. Construct a clean BBL for Sales.  
+4. Merge datasets on BBL.  
+5. Clean numeric fields such as prices, square footage, assessments, and FAR.  
+6. Create derived variables such as `is_landmark`, `in_historic_district`, `construction_year`, `building_age`, `construction_era`, `is_altered`, `years_since_alteration`, `sale_year`, and `sale_month`.  
+7. In `app.py`, encode the categorical fields needed by the model, such as zoning, building class, material, style, and construction era.  
+8. Restrict the modeling sample to transactions with sale price at least $100,000 and then impute the remaining missing values with medians where needed.
+"""
+    )
 
+    st.markdown("---")
+    st.markdown("### Prediction Variables Used in the Model")
+    st.caption("These are the only variables currently used in the prediction model. Other columns in the CSV are kept for exploration and visualization.")
+
+    tab1, tab2 = st.tabs(["Baseline variables", "Heritage variables"])
+
+    with tab1:
+        st.dataframe(variable_dictionary_df("Baseline"), use_container_width=True, height=560)
+
+    with tab2:
+        st.dataframe(variable_dictionary_df("Heritage"), use_container_width=True, height=420)
+
+    st.markdown("---")
     st.markdown("### Data Preview")
     preview_cols = [
         "BBL",
@@ -612,22 +855,23 @@ The final dataset focuses on Manhattan properties with matching sales, PLUTO, an
         "construction_era",
         "style_primary",
         "material_primary",
-        "architect",
+        "is_landmark",
         "in_historic_district",
         "neighborhood",
     ]
-
     avail_cols = [c for c in preview_cols if c in df.columns]
     st.dataframe(df[avail_cols].head(20), use_container_width=True, height=380)
 
     with st.expander("Column types & missing values"):
-        info = pd.DataFrame({
-            "Column": df.columns,
-            "Type": df.dtypes.astype(str).values,
-            "Non-Null": df.notna().sum().values,
-            "Missing %": (df.isna().mean() * 100).round(1).astype(str) + "%",
-        })
-        st.dataframe(info, use_container_width=True, height=400)
+        info = pd.DataFrame(
+            {
+                "Column": df.columns,
+                "Type": df.dtypes.astype(str).values,
+                "Non-Null": df.notna().sum().values,
+                "Missing %": (df.isna().mean() * 100).round(1).astype(str) + "%",
+            }
+        )
+        st.dataframe(info, use_container_width=True, height=420)
 
 
 # =================================================================
@@ -647,12 +891,7 @@ def page2():
 
     section = st.radio(
         "Section",
-        [
-            "Interactive Map",
-            "Price Analysis",
-            "Architectural Patterns",
-            "Era & Correlation",
-        ],
+        ["Interactive Map", "Price Analysis", "Architectural Patterns", "Era & Correlation"],
         horizontal=True,
     )
 
@@ -661,63 +900,39 @@ def page2():
         st.caption("Each column represents a property. Height and color encode selected variables.")
 
         c1, c2, c3 = st.columns(3)
-
         with c1:
             color_var = st.selectbox(
                 "Color by",
-                [
-                    "sale_price",
-                    "price_per_sqft",
-                    "building_age",
-                    "architect_prestige_score",
-                    "num_floors",
-                    "assess_total",
-                ],
+                ["sale_price", "price_per_sqft", "building_age", "num_floors", "assess_total"],
                 format_func=flabel,
             )
-
         with c2:
             height_var = st.selectbox(
                 "Height by",
-                [
-                    "sale_price",
-                    "gross_sqft",
-                    "num_floors",
-                    "building_age",
-                    "price_per_sqft",
-                ],
+                ["sale_price", "gross_sqft", "num_floors", "building_age", "price_per_sqft"],
                 format_func=flabel,
             )
-
         with c3:
-            cmap_name = st.selectbox(
-                "Color palette",
-                ["magma", "inferno", "viridis", "plasma", "turbo", "cividis"],
-            )
+            cmap_name = st.selectbox("Color palette", ["magma", "inferno", "viridis", "plasma", "turbo", "cividis"])
 
         map_d = viz.dropna(subset=[color_var, height_var, "latitude", "longitude"]).copy()
 
         h_vals = pd.to_numeric(map_d[height_var], errors="coerce")
         h_cap = h_vals.quantile(0.97)
+        if pd.isna(h_cap) or h_cap == 0:
+            h_cap = 1
         map_d["_h"] = (h_vals.clip(lower=0, upper=h_cap) / h_cap * 800).fillna(0)
 
         c_vals = pd.to_numeric(map_d[color_var], errors="coerce").fillna(map_d[color_var].median())
-        norm = mcolors.Normalize(
-            vmin=c_vals.quantile(0.02),
-            vmax=c_vals.quantile(0.98),
-        )
+        norm = mcolors.Normalize(vmin=c_vals.quantile(0.02), vmax=c_vals.quantile(0.98))
         cmap = plt.get_cmap(cmap_name)
         rgba = cmap(norm(c_vals.values))
-
         map_d["_r"] = (rgba[:, 0] * 255).astype(int)
         map_d["_g"] = (rgba[:, 1] * 255).astype(int)
         map_d["_b"] = (rgba[:, 2] * 255).astype(int)
 
         map_d["price_fmt"] = map_d["sale_price"].apply(lambda v: f"${v:,.0f}")
-        map_d["sqft_fmt"] = map_d["gross_sqft"].apply(
-            lambda v: f"{v:,.0f} sqft" if pd.notna(v) else "unknown sqft"
-        )
-        map_d["arch_fmt"] = map_d["architect"].fillna("Unknown architect")
+        map_d["sqft_fmt"] = map_d["gross_sqft"].apply(lambda v: f"{v:,.0f} sqft" if pd.notna(v) else "unknown sqft")
         map_d["style_fmt"] = map_d["style_primary"].fillna("")
         map_d["era_fmt"] = map_d["construction_era"].fillna("")
 
@@ -736,13 +951,7 @@ def page2():
             extruded=True,
         )
 
-        view = pdk.ViewState(
-            latitude=40.754,
-            longitude=-73.987,
-            zoom=12.2,
-            pitch=50,
-            bearing=20,
-        )
+        view = pdk.ViewState(latitude=40.754, longitude=-73.987, zoom=12.2, pitch=50, bearing=20)
 
         tooltip = {
             "html": (
@@ -750,7 +959,6 @@ def page2():
                 "<b style='font-size: 14px;'>{display_name}</b><br/>"
                 "<span style='color:#9ca3af;'>{price_fmt}</span><br/>"
                 "<span>{style_fmt}</span><br/>"
-                "<span style='color:#9ca3af;'>by {arch_fmt}</span><br/>"
                 "<span style='color:#9ca3af;'>{era_fmt} · {sqft_fmt}</span>"
                 "</div>"
             ),
@@ -769,7 +977,6 @@ def page2():
             map_style=pdk_style,
             tooltip=tooltip,
         )
-
         st.pydeck_chart(deck, use_container_width=True)
 
         c_min, c_max = c_vals.quantile(0.02), c_vals.quantile(0.98)
@@ -786,7 +993,6 @@ def page2():
             f"rgb({int(r*255)},{int(g*255)},{int(b*255)}) {i*100/9:.0f}%"
             for i, (r, g, b, _) in enumerate(stops)
         )
-
         pretty_color = FRIENDLY_LABELS.get(color_var, color_var)
         pretty_height = FRIENDLY_LABELS.get(height_var, height_var)
 
@@ -827,7 +1033,6 @@ def page2():
             "1940–1969 (Mid-Century)": "#457b9d",
             "1970+": "#a8dadc",
         }
-
         era_d = viz[viz["construction_era"].isin(era_colors.keys())]
 
         fig2 = px.scatter_mapbox(
@@ -837,30 +1042,19 @@ def page2():
             color="construction_era",
             color_discrete_map=era_colors,
             hover_name="display_name",
-            hover_data={
-                "sale_price": ":,.0f",
-                "construction_era": True,
-                "latitude": False,
-                "longitude": False,
-            },
+            hover_data={"sale_price": ":,.0f", "construction_era": True, "latitude": False, "longitude": False},
             zoom=12,
             center={"lat": 40.754, "lon": -73.987},
             height=540,
             template=T["plotly"],
         )
-
-        fig2.update_layout(
-            mapbox_style=T["map_style"],
-            margin={"r": 0, "t": 0, "l": 0, "b": 0},
-        )
-
+        fig2.update_layout(mapbox_style=T["map_style"], margin={"r": 0, "t": 0, "l": 0, "b": 0})
         st.plotly_chart(fig2, use_container_width=True)
 
     elif section == "Price Analysis":
         st.markdown("### Price Distributions")
 
         c1, c2 = st.columns(2)
-
         with c1:
             fig = px.histogram(
                 viz,
@@ -871,7 +1065,6 @@ def page2():
                 template=T["plotly"],
             )
             st.plotly_chart(fig, use_container_width=True)
-
         with c2:
             fig = px.histogram(
                 viz.dropna(subset=["price_per_sqft"]),
@@ -886,14 +1079,7 @@ def page2():
         st.markdown("---")
         st.markdown("### Neighborhood Price Ranking")
 
-        hood = (
-            viz.groupby("neighborhood")["sale_price"]
-            .median()
-            .sort_values(ascending=False)
-            .head(20)
-            .reset_index()
-        )
-
+        hood = viz.groupby("neighborhood")["sale_price"].median().sort_values(ascending=False).head(20).reset_index()
         fig = px.bar(
             hood,
             x="sale_price",
@@ -905,14 +1091,11 @@ def page2():
             height=550,
             labels={"sale_price": "Median Sale Price ($)", "neighborhood": ""},
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
         st.markdown("### Price by Historic District")
-
         hd = viz[viz["historic_district"].astype(str).str.len() > 0]
-
         fig = px.box(
             hd,
             x="historic_district",
@@ -921,7 +1104,6 @@ def page2():
             height=480,
             labels={"historic_district": "", "price_per_sqft": "$/SqFt"},
         )
-
         fig.update_xaxes(tickangle=35)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -936,7 +1118,6 @@ def page2():
             .head(20)
             .reset_index()
         )
-
         fig = px.bar(
             sp,
             x="median",
@@ -949,16 +1130,12 @@ def page2():
             height=560,
             labels={"median": "Median $/SqFt", "style_primary": ""},
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
-
         c1, c2 = st.columns(2)
-
         with c1:
             st.markdown("#### Facade Material")
-
             mp = (
                 viz.groupby("material_primary")["price_per_sqft"]
                 .agg(["median", "count"])
@@ -967,7 +1144,6 @@ def page2():
                 .head(12)
                 .reset_index()
             )
-
             fig = px.bar(
                 mp,
                 x="median",
@@ -979,113 +1155,42 @@ def page2():
                 height=440,
                 labels={"median": "$/SqFt", "material_primary": ""},
             )
-
             st.plotly_chart(fig, use_container_width=True)
 
         with c2:
-            st.markdown("#### Top Architects by Median Sale Price")
-
-            ap = (
-                viz.groupby("architect")["sale_price"]
-                .agg(["median", "count"])
-                .query("count >= 5")
-                .sort_values("median", ascending=False)
-                .head(12)
-                .reset_index()
-            )
-
-            fig = px.bar(
-                ap,
-                x="median",
-                y="architect",
-                orientation="h",
-                color="median",
-                color_continuous_scale="Plasma",
-                hover_data={"count": True},
+            st.markdown("#### Landmark vs Non-Landmark")
+            temp = viz.copy()
+            temp["landmark_label"] = np.where(temp["is_landmark"] == 1, "Landmark", "Not Landmark")
+            fig = px.box(
+                temp,
+                x="landmark_label",
+                y="price_per_sqft",
+                color="landmark_label",
                 template=T["plotly"],
-                height=440,
-                labels={"median": "Median Sale $", "architect": ""},
+                labels={"landmark_label": "", "price_per_sqft": "$/SqFt"},
             )
-
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### Architect Signal vs Price")
-
-        scatter_d = viz.dropna(subset=["architect_prestige_score", "price_per_sqft"])
-
+        st.markdown("### Material and Style Crosstab")
+        cross = (
+            viz.groupby(["material_primary", "style_primary"])["BBL"]
+            .count()
+            .reset_index(name="count")
+            .sort_values("count", ascending=False)
+            .head(40)
+        )
         fig = px.scatter(
-            scatter_d,
-            x="architect_prestige_score",
-            y="price_per_sqft",
-            color="construction_era",
-            hover_name="architect",
-            opacity=0.5,
-            trendline="ols",
+            cross,
+            x="material_primary",
+            y="style_primary",
+            size="count",
+            color="count",
             template=T["plotly"],
-            labels={
-                "architect_prestige_score": "Architect Portfolio Score",
-                "price_per_sqft": "$/SqFt",
-            },
+            height=520,
+            labels={"material_primary": "Facade Material", "style_primary": "Architectural Style", "count": "Count"},
         )
-
         st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("### Architect Value Leaderboard")
-        st.caption("This table summarizes price patterns by architect. It is descriptive, not causal.")
-
-        min_n = st.slider("Minimum buildings per architect", 3, 25, 5, key="arch_minN")
-
-        market = viz[
-            (viz["sale_price"] >= 100_000)
-            & (viz["price_per_sqft"] >= 50)
-        ].copy()
-
-        city_med_psf = market["price_per_sqft"].median()
-
-        g = (
-            market.dropna(subset=["architect"])
-            .groupby("architect")
-            .agg(
-                buildings=("BBL", "count"),
-                median_price=("sale_price", "median"),
-                median_psf=("price_per_sqft", "median"),
-                landmark_share=("is_landmark", "mean"),
-                prestige=("architect_prestige_score", "mean"),
-                hist_dist_share=("in_historic_district", "mean"),
-            )
-            .reset_index()
-        )
-
-        g = g[g["buildings"] >= min_n].copy()
-        g["price_position_pct"] = (g["median_psf"] / city_med_psf - 1) * 100
-        g = g.sort_values("price_position_pct", ascending=False)
-        g.insert(0, "Rank", range(1, len(g) + 1))
-
-        leaderboard = g.rename(columns={
-            "architect": "Architect",
-            "buildings": "# Buildings",
-            "median_price": "Median Sale Price",
-            "median_psf": "Median $/SqFt",
-            "price_position_pct": "Price Position %",
-            "landmark_share": "% Landmarked",
-            "hist_dist_share": "% in Hist. Dist.",
-            "prestige": "Architect Signal",
-        })
-
-        st.dataframe(
-            leaderboard.style.format({
-                "Median Sale Price": "${:,.0f}",
-                "Median $/SqFt": "${:,.0f}",
-                "Price Position %": "{:+.1f}%",
-                "% Landmarked": "{:.0%}",
-                "% in Hist. Dist.": "{:.0%}",
-                "Architect Signal": "{:.2f}",
-            }).background_gradient(subset=["Price Position %"], cmap="RdYlGn"),
-            use_container_width=True,
-            height=460,
-        )
 
     else:
         st.markdown("### Price by Construction Era")
@@ -1100,7 +1205,6 @@ def page2():
         ]
 
         era_d = viz[viz["construction_era"].isin(era_order)]
-
         fig = px.box(
             era_d,
             x="construction_era",
@@ -1112,17 +1216,13 @@ def page2():
             height=450,
             labels={"construction_era": "", "price_per_sqft": "$/SqFt"},
         )
-
         fig.update_layout(showlegend=False, xaxis_tickangle=15)
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
-
         c1, c2 = st.columns(2)
-
         with c1:
             st.markdown("#### Building Age vs Sale Price")
-
             fig = px.scatter(
                 viz.dropna(subset=["building_age"]),
                 x="building_age",
@@ -1131,17 +1231,12 @@ def page2():
                 opacity=0.4,
                 trendline="ols",
                 template=T["plotly"],
-                labels={
-                    "building_age": "Age",
-                    "sale_price": "Sale Price ($)",
-                },
+                labels={"building_age": "Age", "sale_price": "Sale Price ($)"},
             )
-
             st.plotly_chart(fig, use_container_width=True)
 
         with c2:
             st.markdown("#### Altered vs Original Buildings")
-
             fig = px.violin(
                 viz,
                 x="is_altered",
@@ -1149,17 +1244,12 @@ def page2():
                 box=True,
                 color="is_altered",
                 template=T["plotly"],
-                labels={
-                    "is_altered": "Altered (1 = Yes)",
-                    "price_per_sqft": "$/SqFt",
-                },
+                labels={"is_altered": "Altered (1 = Yes)", "price_per_sqft": "$/SqFt"},
             )
-
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("---")
         st.markdown("### Correlation Matrix")
-
         corr_cols = [
             "sale_price",
             "price_per_sqft",
@@ -1167,12 +1257,10 @@ def page2():
             "num_floors",
             "gross_sqft",
             "assess_total",
-            "architect_prestige_score",
-            "rare_style_score",
             "is_altered",
             "in_historic_district",
+            "is_landmark",
         ]
-
         ac = [c for c in corr_cols if c in viz.columns]
         cm = viz[ac].corr()
         mask = np.triu(np.ones_like(cm, dtype=bool))
@@ -1191,7 +1279,6 @@ def page2():
             vmin=-1,
             vmax=1,
         )
-
         ax.set_title("Feature Correlation Matrix")
         plt.tight_layout()
         st.pyplot(fig_c)
@@ -1207,56 +1294,49 @@ def page3():
         "Comparing a structural baseline model with a heritage-enhanced model"
     )
 
-    st.markdown("""
-This page directly tests the central research question.  
-The baseline model uses only standard real-estate variables.  
-The heritage-enhanced model adds architectural and preservation variables.
+    st.markdown(
+        """
+This page directly tests the research question.
 
-If the heritage-enhanced model has a higher test R² or lower dollar error, then heritage-related variables improve prediction.
-    """)
+- **Baseline model** = standard real-estate variables only  
+- **Heritage-enhanced model** = baseline variables + the 8 selected heritage variables
+
+The target is **log-transformed sale price**.  
+Performance is shown with **R²** and dollar-scale error metrics.
+"""
+    )
 
     c1, c2, c3 = st.columns(3)
-
     with c1:
         test_sz = st.slider("Test set size", 0.1, 0.4, 0.2, 0.05)
-
     with c2:
         rs = st.number_input("Random state", 0, 100, 42)
-
     with c3:
-        do_scale = st.checkbox("Scale features", True)
+        do_scale = st.checkbox("Scale linear models", True)
+
+    idx_all = np.arange(len(mdf))
+    train_idx, test_idx = train_test_split(idx_all, test_size=test_sz, random_state=rs)
 
     X_b = mdf[FB].values
     X_a = mdf[FALL].values
     y = mdf["log_price"].values
-    idx_all = np.arange(len(mdf))
 
-    Xb_tr, Xb_te, y_tr, y_te, _, te_idx = train_test_split(
-        X_b,
-        y,
-        idx_all,
-        test_size=test_sz,
-        random_state=rs,
-    )
-
-    Xa_tr, Xa_te, _, _ = train_test_split(
-        X_a,
-        y,
-        test_size=test_sz,
-        random_state=rs,
-    )
+    Xb_tr, Xb_te = X_b[train_idx], X_b[test_idx]
+    Xa_tr, Xa_te = X_a[train_idx], X_a[test_idx]
+    y_tr, y_te = y[train_idx], y[test_idx]
 
     if do_scale:
-        sc1 = StandardScaler()
-        Xb_tr_s = sc1.fit_transform(Xb_tr)
-        Xb_te_s = sc1.transform(Xb_te)
+        scb = StandardScaler()
+        Xb_tr_s = scb.fit_transform(Xb_tr)
+        Xb_te_s = scb.transform(Xb_te)
 
-        sc2 = StandardScaler()
-        Xa_tr_s = sc2.fit_transform(Xa_tr)
-        Xa_te_s = sc2.transform(Xa_te)
+        sca = StandardScaler()
+        Xa_tr_s = sca.fit_transform(Xa_tr)
+        Xa_te_s = sca.transform(Xa_te)
     else:
         Xb_tr_s, Xb_te_s = Xb_tr, Xb_te
         Xa_tr_s, Xa_te_s = Xa_tr, Xa_te
+        sca = None
 
     MODELS = {
         "Linear Regression": (LinearRegression(), True),
@@ -1264,23 +1344,8 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
         "Lasso Regression": (Lasso(alpha=0.05), True),
         "Elastic Net": (ElasticNet(alpha=0.05, l1_ratio=0.5, random_state=rs), True),
         "Decision Tree": (DecisionTreeRegressor(max_depth=10, random_state=rs), False),
-        "Random Forest": (
-            RandomForestRegressor(
-                n_estimators=100,
-                max_depth=10,
-                random_state=rs,
-                n_jobs=-1,
-            ),
-            False,
-        ),
-        "Gradient Boosting": (
-            GradientBoostingRegressor(
-                n_estimators=100,
-                max_depth=5,
-                random_state=rs,
-            ),
-            False,
-        ),
+        "Random Forest": (RandomForestRegressor(n_estimators=100, max_depth=10, random_state=rs, n_jobs=-1), False),
+        "Gradient Boosting": (GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=rs), False),
     }
 
     if HAS_LGBM:
@@ -1316,11 +1381,9 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
     sel = []
     names = list(MODELS.keys())
     per_row = 4
-
     for start in range(0, len(names), per_row):
         row = names[start:start + per_row]
         cols = st.columns(per_row)
-
         for nm, col in zip(row, cols):
             if col.checkbox(nm, True, key=f"m_{nm}"):
                 sel.append(nm)
@@ -1329,14 +1392,11 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
         st.warning("Select at least one model.")
         return
 
-    base_rows = []
-    herit_rows = []
+    base_rows, herit_rows = [], []
     trained_h = {}
     timings = {}
 
-    import random
     facts_pool = random.sample(MANHATTAN_FACTS, k=min(len(sel), len(MANHATTAN_FACTS)))
-
     progress = st.progress(0, text="Starting...")
     status = st.empty()
     fact_box = st.empty()
@@ -1349,7 +1409,6 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
             f" &middot; <span style='color:#6E6E73'>baseline + heritage-enhanced</span>",
             unsafe_allow_html=True,
         )
-
         fact_box.info(facts_pool[(i - 1) % len(facts_pool)])
         t0 = time.perf_counter()
 
@@ -1367,175 +1426,122 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
         elapsed = time.perf_counter() - t0
         timings[nm] = elapsed
 
-        base_rows.append({
-            "Model": nm,
-            **{k: v for k, v in rb.items() if k not in ("preds", "model")},
-            "Time(s)": round(elapsed, 2),
-        })
-
-        herit_rows.append({
-            "Model": nm,
-            **{k: v for k, v in rh.items() if k not in ("preds", "model")},
-            "Time(s)": round(elapsed, 2),
-        })
-
+        base_rows.append({"Model": nm, **{k: v for k, v in rb.items() if k not in ("preds", "model")}, "Time(s)": round(elapsed, 2)})
+        herit_rows.append({"Model": nm, **{k: v for k, v in rh.items() if k not in ("preds", "model")}, "Time(s)": round(elapsed, 2)})
         herit_rows[-1]["preds"] = rh["preds"]
-        trained_h[nm] = mh
 
-        progress.progress(
-            i / len(sel),
-            text=f"Done {i}/{len(sel)} · {nm} took {elapsed:.1f}s"
-        )
+        trained_h[nm] = {
+            "model": mh,
+            "needs_scale": needs_scale,
+        }
 
-        live_lb = (
-            pd.DataFrame(herit_rows)[["Model", "R2_test"]]
-            .sort_values("R2_test", ascending=True)
-        )
+        progress.progress(i / len(sel), text=f"Done {i}/{len(sel)} · {nm} took {elapsed:.1f}s")
 
+        live_lb = pd.DataFrame(herit_rows)[["Model", "R2_test"]].sort_values("R2_test", ascending=True)
         is_winner = live_lb["R2_test"] == live_lb["R2_test"].max()
         bar_colors = [T["accent"] if w else "#94a3b8" for w in is_winner]
 
-        live_fig = go.Figure(go.Bar(
-            x=live_lb["R2_test"],
-            y=live_lb["Model"],
-            orientation="h",
-            marker_color=bar_colors,
-            text=[f"{v:.3f}" for v in live_lb["R2_test"]],
-            textposition="outside",
-        ))
-
+        live_fig = go.Figure(
+            go.Bar(
+                x=live_lb["R2_test"],
+                y=live_lb["Model"],
+                orientation="h",
+                marker_color=bar_colors,
+                text=[f"{v:.3f}" for v in live_lb["R2_test"]],
+                textposition="outside",
+            )
+        )
         live_fig.update_layout(
             template=T["plotly"],
             height=max(220, 38 * len(live_lb) + 80),
             margin=dict(l=10, r=30, t=30, b=10),
             xaxis_title="R² Test Score",
-            title=dict(
-                text=f"Live Leaderboard — leader: {live_lb.iloc[-1]['Model']}",
-                x=0.02,
-                font=dict(size=14),
-            ),
+            title=dict(text=f"🏆 Live Leaderboard — leader: {live_lb.iloc[-1]['Model']}", x=0.02, font=dict(size=14)),
             xaxis=dict(range=[0, max(0.7, live_lb["R2_test"].max() * 1.1)]),
         )
-
-        leaderboard_box.plotly_chart(
-            live_fig,
-            use_container_width=True,
-            key=f"live_lb_{i}",
-        )
+        leaderboard_box.plotly_chart(live_fig, use_container_width=True, key=f"live_lb_{i}")
 
     total_elapsed = time.perf_counter() - total_t0
-
     progress.empty()
     fact_box.empty()
 
     status.success(
-        f"Trained {len(sel)} model{'s' if len(sel) > 1 else ''} in {total_elapsed:.1f}s "
+        f"✅ Trained {len(sel)} model{'s' if len(sel) > 1 else ''} in {total_elapsed:.1f}s "
         f"(slowest: {max(timings, key=timings.get)} at {max(timings.values()):.1f}s)"
     )
+
+    st.balloons()
 
     dfb = pd.DataFrame(base_rows).set_index("Model")
     dfh = pd.DataFrame(herit_rows).set_index("Model")
 
     st.session_state["trained_h"] = trained_h
     st.session_state["feat_all"] = FALL
-    st.session_state["Xa_tr"] = Xa_tr
-    st.session_state["Xa_te"] = Xa_te
+    st.session_state["Xa_tr_raw"] = Xa_tr
+    st.session_state["Xa_te_raw"] = Xa_te
+    st.session_state["Xa_tr_scaled"] = Xa_tr_s
+    st.session_state["Xa_te_scaled"] = Xa_te_s
+    st.session_state["heritage_scaler"] = sca
     st.session_state["y_tr"] = y_tr
     st.session_state["y_te"] = y_te
-    st.session_state["te_idx"] = te_idx
+    st.session_state["test_idx"] = test_idx
 
     st.markdown("---")
     st.markdown("### Results: Baseline vs Heritage-Enhanced")
-    st.caption(
-        "Higher **R² (Test)** = the model explains more of the price variation. "
-        "Lower **MAE / RMSE** = predictions are closer to the true sale price in dollars. "
-        "Linear-family models report large dollar errors because they predict in log-space "
-        "and a small log-error can blow up after `expm1`."
-    )
 
     c1, c2 = st.columns(2)
-
-    fmt_cols = [
-        "R2_train",
-        "R2_test",
-        "MAE_dollars",
-        "RMSE_dollars",
-        "Time(s)",
-    ]
-    nice_cols = {
-        "R2_train": "R² (Train)",
-        "R2_test": "R² (Test)",
-        "MAE_dollars": "MAE ($)",
-        "RMSE_dollars": "RMSE ($)",
-        "Time(s)": "Time (s)",
-    }
-    fmt_spec = {
-        "R² (Train)": "{:.4f}",
-        "R² (Test)": "{:.4f}",
-        "MAE ($)": "${:,.0f}",
-        "RMSE ($)": "${:,.0f}",
-        "Time (s)": "{:.2f}",
-    }
+    fmt_cols = ["R2_train", "R2_test", "MAE_dollars", "RMSE_dollars", "Time(s)"]
 
     with c1:
         st.markdown("**Baseline Model — structural variables only**")
         st.dataframe(
-            dfb[fmt_cols].rename(columns=nice_cols).style
-                .highlight_max(subset=["R² (Test)"], color="#667eea")
-                .highlight_min(subset=["MAE ($)", "RMSE ($)"], color="#2ecc71")
-                .format(fmt_spec),
+            dfb[fmt_cols].style.format(
+                {
+                    "R2_train": "{:.4f}",
+                    "R2_test": "{:.4f}",
+                    "MAE_dollars": "${:,.0f}",
+                    "RMSE_dollars": "${:,.0f}",
+                    "Time(s)": "{:.2f}",
+                }
+            ),
             use_container_width=True,
         )
 
     with c2:
-        st.markdown("**Heritage-Enhanced Model — baseline + heritage variables**")
+        st.markdown("**Heritage-Enhanced Model — baseline + 8 heritage variables**")
         st.dataframe(
-            dfh[fmt_cols].rename(columns=nice_cols).style
-                .highlight_max(subset=["R² (Test)"], color="#667eea")
-                .highlight_min(subset=["MAE ($)", "RMSE ($)"], color="#2ecc71")
-                .format(fmt_spec),
+            dfh[fmt_cols].style.format(
+                {
+                    "R2_train": "{:.4f}",
+                    "R2_test": "{:.4f}",
+                    "MAE_dollars": "${:,.0f}",
+                    "RMSE_dollars": "${:,.0f}",
+                    "Time(s)": "{:.2f}",
+                }
+            ),
             use_container_width=True,
         )
 
     st.markdown("---")
     st.markdown("### Heritage Feature Uplift")
-    st.caption("This chart shows whether adding architectural and preservation variables improves test performance.")
+    st.caption("This chart shows whether adding the selected heritage variables improves test performance.")
 
-    up = pd.DataFrame({
-        "Model": sel,
-        "Baseline R²": [dfb.loc[n, "R2_test"] for n in sel],
-        "Heritage-Enhanced R²": [dfh.loc[n, "R2_test"] for n in sel],
-    })
-
+    up = pd.DataFrame(
+        {
+            "Model": sel,
+            "Baseline R²": [dfb.loc[n, "R2_test"] for n in sel],
+            "Heritage-Enhanced R²": [dfh.loc[n, "R2_test"] for n in sel],
+        }
+    )
     up["Uplift"] = up["Heritage-Enhanced R²"] - up["Baseline R²"]
 
     fig = go.Figure()
-
-    fig.add_trace(go.Bar(
-        name="Baseline",
-        x=up["Model"],
-        y=up["Baseline R²"],
-        marker_color="steelblue",
-    ))
-
-    fig.add_trace(go.Bar(
-        name="Heritage-Enhanced",
-        x=up["Model"],
-        y=up["Heritage-Enhanced R²"],
-        marker_color=T["accent"],
-    ))
-
-    fig.update_layout(
-        barmode="group",
-        template=T["plotly"],
-        height=400,
-        yaxis_title="R² Test Score",
-    )
-
+    fig.add_trace(go.Bar(name="Baseline", x=up["Model"], y=up["Baseline R²"], marker_color="steelblue"))
+    fig.add_trace(go.Bar(name="Heritage-Enhanced", x=up["Model"], y=up["Heritage-Enhanced R²"], marker_color=T["accent"]))
+    fig.update_layout(barmode="group", template=T["plotly"], height=400, yaxis_title="R² Test Score")
     st.plotly_chart(fig, use_container_width=True)
 
     best = up.loc[up["Heritage-Enhanced R²"].idxmax()]
-
     st.success(
         f"Best heritage-enhanced model: **{best['Model']}**. "
         f"R² = {best['Heritage-Enhanced R²']:.4f}. "
@@ -1544,7 +1550,6 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
 
     st.markdown("---")
     st.markdown("### Actual vs Predicted")
-
     pick = st.selectbox("Model", sel, key="avp")
     yp = dfh.loc[pick, "preds"]
 
@@ -1553,42 +1558,23 @@ If the heritage-enhanced model has a higher test R² or lower dollar error, then
         y=yp,
         opacity=0.4,
         template=T["plotly"],
-        labels={
-            "x": "Actual log price",
-            "y": "Predicted log price",
-        },
+        labels={"x": "Actual log price", "y": "Predicted log price"},
     )
-
-    fig.add_shape(
-        type="line",
-        x0=y_te.min(),
-        x1=y_te.max(),
-        y0=y_te.min(),
-        y1=y_te.max(),
-        line=dict(color="red", dash="dash"),
-    )
-
+    fig.add_shape(type="line", x0=y_te.min(), x1=y_te.max(), y0=y_te.min(), y1=y_te.max(), line=dict(color="red", dash="dash"))
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
     st.markdown("### Where the Model Disagrees with the Market")
-    st.caption("""
-Residuals compare actual price with predicted price. Positive residuals mean the market paid more than the model expected. Negative residuals mean the market paid less than the model expected.
-    """)
+    st.caption("Residuals compare actual price with predicted price. Positive means the market paid more than the model expected.")
 
-    test_rows = mdf.iloc[te_idx].copy().reset_index(drop=True)
+    test_rows = mdf.iloc[test_idx].copy().reset_index(drop=True)
     test_rows["actual_price"] = np.expm1(y_te)
     test_rows["pred_price"] = np.expm1(yp)
     test_rows["residual_log"] = y_te - yp
-    test_rows["residual_pct"] = (
-        test_rows["actual_price"] / test_rows["pred_price"] - 1
-    ) * 100
-    test_rows["abs_dollar_diff"] = (
-        test_rows["actual_price"] - test_rows["pred_price"]
-    )
+    test_rows["residual_pct"] = (test_rows["actual_price"] / test_rows["pred_price"] - 1) * 100
+    test_rows["abs_dollar_diff"] = test_rows["actual_price"] - test_rows["pred_price"]
 
     map_d = test_rows.dropna(subset=["latitude", "longitude"]).copy()
-
     diverging = [
         [0.0, "#dc2626"],
         [0.25, "#f87171"],
@@ -1612,7 +1598,6 @@ Residuals compare actual price with predicted price. Positive residuals mean the
             "actual_price": ":$,.0f",
             "pred_price": ":$,.0f",
             "residual_pct": ":+.1f",
-            "architect": True,
             "construction_era": True,
             "latitude": False,
             "longitude": False,
@@ -1623,82 +1608,38 @@ Residuals compare actual price with predicted price. Positive residuals mean the
         mapbox_style=T["map_style"],
         labels={"residual_pct": "Residual %"},
     )
-
     fig_map.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
         coloraxis_colorbar=dict(
             title="Residual %",
             ticksuffix="%",
             tickvals=[-80, -40, 0, 40, 80],
-            ticktext=[
-                "−80%<br>Below model",
-                "−40%",
-                "0%<br>On model",
-                "+40%",
-                "+80%<br>Above model",
-            ],
+            ticktext=["−80%<br>Below model", "−40%", "0%<br>On model", "+40%", "+80%<br>Above model"],
         ),
     )
-
     st.plotly_chart(fig_map, use_container_width=True)
 
     st.markdown("### Biggest Model Misses")
-
-    show_cols = [
-        "display_name",
-        "architect",
-        "construction_era",
-        "actual_price",
-        "pred_price",
-        "residual_pct",
-        "neighborhood",
-    ]
-
+    show_cols = ["display_name", "construction_era", "actual_price", "pred_price", "residual_pct", "neighborhood"]
     rename = {
         "display_name": "Property",
-        "architect": "Architect",
         "construction_era": "Era",
         "actual_price": "Actual",
         "pred_price": "Predicted",
         "residual_pct": "Diff %",
         "neighborhood": "Neighborhood",
     }
-
-    fmt = {
-        "Actual": "${:,.0f}",
-        "Predicted": "${:,.0f}",
-        "Diff %": "{:+.1f}%",
-    }
+    fmt = {"Actual": "${:,.0f}", "Predicted": "${:,.0f}", "Diff %": "{:+.1f}%"}
 
     c1, c2 = st.columns(2)
-
     with c1:
         st.markdown("**Top 10 Above Model Prediction**")
-        top_above = (
-            test_rows.sort_values("residual_pct", ascending=False)
-            .head(10)[show_cols]
-            .rename(columns=rename)
-        )
-
-        st.dataframe(
-            top_above.style.format(fmt),
-            use_container_width=True,
-            height=380,
-        )
-
+        top_above = test_rows.sort_values("residual_pct", ascending=False).head(10)[show_cols].rename(columns=rename)
+        st.dataframe(top_above.style.format(fmt), use_container_width=True, height=380)
     with c2:
         st.markdown("**Top 10 Below Model Prediction**")
-        top_below = (
-            test_rows.sort_values("residual_pct", ascending=True)
-            .head(10)[show_cols]
-            .rename(columns=rename)
-        )
-
-        st.dataframe(
-            top_below.style.format(fmt),
-            use_container_width=True,
-            height=380,
-        )
+        top_below = test_rows.sort_values("residual_pct", ascending=True).head(10)[show_cols].rename(columns=rename)
+        st.dataframe(top_below.style.format(fmt), use_container_width=True, height=380)
 
 
 # =================================================================
@@ -1716,17 +1657,16 @@ def page4():
 
     trained = st.session_state["trained_h"]
     fnames = st.session_state["feat_all"]
-    Xa_te = st.session_state["Xa_te"]
-    Xa_tr = st.session_state["Xa_tr"]
 
     sel = st.selectbox("Model", list(trained.keys()))
-    model = trained[sel]
+    model_info = trained[sel]
+    model = model_info["model"]
+    needs_scale = model_info["needs_scale"]
 
-    section = st.radio(
-        "View",
-        ["Feature Importance", "SHAP Analysis"],
-        horizontal=True,
-    )
+    Xa_te = st.session_state["Xa_te_scaled"] if needs_scale else st.session_state["Xa_te_raw"]
+    Xa_tr = st.session_state["Xa_tr_scaled"] if needs_scale else st.session_state["Xa_tr_raw"]
+
+    section = st.radio("View", ["Feature Importance", "SHAP Analysis"], horizontal=True)
 
     if section == "Feature Importance":
         if hasattr(model, "feature_importances_"):
@@ -1737,11 +1677,13 @@ def page4():
             st.warning("This model does not expose importance values.")
             return
 
-        fi = pd.DataFrame({
-            "Feature": [flabel(f) for f in fnames],
-            "Importance": imp,
-            "Type": ["Baseline" if f in FB else "Heritage" for f in fnames],
-        }).sort_values("Importance", ascending=True)
+        fi = pd.DataFrame(
+            {
+                "Feature": [flabel(f) for f in fnames],
+                "Importance": imp,
+                "Type": ["Baseline" if f in FB else "Heritage" for f in fnames],
+            }
+        ).sort_values("Importance", ascending=True)
 
         fig = px.bar(
             fi,
@@ -1749,35 +1691,28 @@ def page4():
             y="Feature",
             orientation="h",
             color="Type",
-            color_discrete_map={
-                "Baseline": "steelblue",
-                "Heritage": T["accent"],
-            },
+            color_discrete_map={"Baseline": "steelblue", "Heritage": T["accent"]},
             template=T["plotly"],
             height=550,
             labels={"Importance": "Importance", "Feature": ""},
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
         total = fi["Importance"].sum()
-        h_share = fi[fi["Type"] == "Heritage"]["Importance"].sum()
-
+        heritage_share = fi[fi["Type"] == "Heritage"]["Importance"].sum()
         if total > 0:
-            st.info(
-                f"Heritage-related features account for **{h_share / total * 100:.1f}%** "
-                f"of this model's total importance."
-            )
+            st.info(f"Heritage-related features account for **{heritage_share / total * 100:.1f}%** of this model's total importance.")
 
         if hasattr(model, "coef_"):
             st.markdown("---")
             st.markdown("### Coefficient Direction")
-
-            coef = pd.DataFrame({
-                "Feature": [flabel(f) for f in fnames],
-                "Coefficient": model.coef_,
-                "Type": ["Baseline" if f in FB else "Heritage" for f in fnames],
-            }).sort_values("Coefficient", key=abs, ascending=True)
+            coef = pd.DataFrame(
+                {
+                    "Feature": [flabel(f) for f in fnames],
+                    "Coefficient": model.coef_,
+                    "Type": ["Baseline" if f in FB else "Heritage" for f in fnames],
+                }
+            ).sort_values("Coefficient", key=abs, ascending=True)
 
             fig = px.bar(
                 coef,
@@ -1785,14 +1720,10 @@ def page4():
                 y="Feature",
                 orientation="h",
                 color="Type",
-                color_discrete_map={
-                    "Baseline": "steelblue",
-                    "Heritage": T["accent"],
-                },
+                color_discrete_map={"Baseline": "steelblue", "Heritage": T["accent"]},
                 template=T["plotly"],
                 height=550,
             )
-
             fig.add_vline(x=0, line_dash="dash")
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1809,7 +1740,6 @@ def page4():
                     sv = explainer.shap_values(Xa_te[:250])
 
             st.markdown("### SHAP Summary Plot")
-
             fig_s, ax = plt.subplots(figsize=(11, 7))
             shap.summary_plot(
                 sv,
@@ -1818,21 +1748,17 @@ def page4():
                 show=False,
                 max_display=15,
             )
-
             st.pyplot(fig_s)
             plt.close()
 
             st.markdown("---")
             st.markdown("### Individual Prediction Breakdown")
-
             idx = st.slider("Sample index", 0, min(249, Xa_te.shape[0] - 1), 0)
             pred_log = model.predict(Xa_te[idx:idx + 1])[0]
-
             st.metric("Predicted Sale Price", f"${np.expm1(pred_log):,.0f}")
 
             fig_w, _ = plt.subplots(figsize=(10, 5))
             ev = explainer.expected_value
-
             if isinstance(ev, (list, np.ndarray)):
                 ev = ev[0]
 
@@ -1842,7 +1768,6 @@ def page4():
                 data=Xa_te[idx],
                 feature_names=[flabel(f) for f in fnames],
             )
-
             shap.waterfall_plot(explanation, show=False, max_display=12)
             st.pyplot(fig_w)
             plt.close()
@@ -1851,7 +1776,6 @@ def page4():
             st.error("SHAP is not installed. Run `pip install shap` and restart the app.")
         except Exception as e:
             st.error(f"SHAP error: {e}")
-            st.info("Try selecting a tree-based model for more reliable SHAP analysis.")
 
 
 # =================================================================
@@ -1863,14 +1787,19 @@ def page5():
         "Testing different model settings to improve prediction performance"
     )
 
-    with st.expander("What is hyperparameter tuning?", expanded=False):
-        st.markdown("""
-Hyperparameters are the model settings chosen before training.  
-For example, a random forest needs to know how many trees to use, and a decision tree needs to know how deep it can grow.
+    with st.expander("📚 What is hyperparameter tuning?", expanded=False):
+        st.markdown(
+            """
+Hyperparameters are the settings chosen before training a model.
 
-This page tries different combinations of hyperparameters and compares their performance.
-The goal is to find a stronger version of the heritage-enhanced prediction model.
-        """)
+Examples:
+- the number of trees in a random forest
+- the max depth of a tree
+- the learning rate in boosting models
+
+This page tries different combinations and compares their performance on the heritage-enhanced feature set.
+"""
+        )
 
     X = mdf[FALL].values
     y = mdf["log_price"].values
@@ -1883,253 +1812,87 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         "Random Forest",
         "Gradient Boosting",
     ]
-
     if HAS_LGBM:
         tune_choices.append("LightGBM")
 
     c1, c2 = st.columns(2)
-
     with c1:
-        model_name = st.selectbox(
-            "Model",
-            tune_choices,
-            help=(
-                "Pick which family to tune. Linear models (Ridge/Lasso/Elastic Net) "
-                "tune regularization strength. Tree models tune depth and "
-                "ensemble size. Boosting models (LightGBM, GBR) also tune "
-                "learning rate."
-            ),
-        )
-
+        model_name = st.selectbox("Model", tune_choices)
     with c2:
-        test_sz = st.slider(
-            "Test size",
-            0.1, 0.4, 0.2, 0.05,
-            key="hp_ts",
-            help="Fraction of rows held out for evaluation. 0.2 = 80/20 split.",
-        )
+        test_sz = st.slider("Test size", 0.1, 0.4, 0.2, 0.05, key="hp_ts")
 
     st.markdown("---")
     st.markdown("### Hyperparameter Grid")
-
-    MODEL_TIPS = {
-        "Ridge Regression": (
-            "**Alpha** controls how strongly large coefficients are penalised. "
-            "Small alpha → behaves like plain Linear Regression. "
-            "Large alpha → coefficients shrink toward 0, model gets simpler."
-        ),
-        "Lasso Regression": (
-            "**Alpha** is the L1 penalty. Lasso can drop weak features by setting "
-            "their coefficient exactly to 0, so a larger alpha = a sparser model."
-        ),
-        "Elastic Net": (
-            "Combines L1 (Lasso) and L2 (Ridge). **Alpha** = total penalty strength, "
-            "**L1 ratio** = how much of that penalty is L1 vs L2 (1 = pure Lasso, 0 = pure Ridge)."
-        ),
-        "Decision Tree": (
-            "**Max depth** caps how many questions the tree can ask in a row. "
-            "Deeper trees fit training data more tightly but risk overfitting. "
-            "**Min samples split** prevents tiny branches by refusing to split a node "
-            "with fewer than N rows."
-        ),
-        "Random Forest": (
-            "**N estimators** = how many trees to average. More trees → smoother predictions "
-            "but slower training. **Max depth** limits each tree's complexity."
-        ),
-        "Gradient Boosting": (
-            "Boosting builds trees sequentially, each one fixing the previous one's mistakes. "
-            "**Learning rate** controls how much each tree corrects (smaller = safer but needs more trees). "
-            "**N estimators** = how many trees in total."
-        ),
-        "LightGBM": (
-            "Fast, leaf-wise gradient boosting. **N estimators** = number of trees, "
-            "**Num leaves** = tree complexity (more leaves = more flexible, more overfit risk), "
-            "**Learning rate** = step size per tree."
-        ),
-    }
-    if model_name in MODEL_TIPS:
-        st.caption("Tip: " + MODEL_TIPS[model_name])
-
     grid = []
 
     if model_name == "Ridge Regression":
-        alphas = st.multiselect(
-            "Alpha",
-            [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
-            default=[0.01, 0.1, 1.0, 10.0, 100.0],
-        )
+        alphas = st.multiselect("Alpha", [0.001, 0.01, 0.1, 1.0, 10.0, 100.0], default=[0.01, 0.1, 1.0, 10.0, 100.0])
         grid = [{"alpha": a} for a in alphas]
 
     elif model_name == "Lasso Regression":
-        alphas = st.multiselect(
-            "Alpha",
-            [0.0001, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
-            default=[0.001, 0.01, 0.1, 0.5],
-        )
+        alphas = st.multiselect("Alpha", [0.0001, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0], default=[0.001, 0.01, 0.1, 0.5])
         grid = [{"alpha": a} for a in alphas]
 
     elif model_name == "Elastic Net":
-        alphas = st.multiselect(
-            "Alpha",
-            [0.001, 0.01, 0.05, 0.1, 0.5, 1.0],
-            default=[0.01, 0.05, 0.1],
-        )
-
-        l1s = st.multiselect(
-            "L1 ratio",
-            [0.1, 0.3, 0.5, 0.7, 0.9],
-            default=[0.3, 0.5, 0.7],
-        )
-
+        alphas = st.multiselect("Alpha", [0.001, 0.01, 0.05, 0.1, 0.5, 1.0], default=[0.01, 0.05, 0.1])
+        l1s = st.multiselect("L1 ratio", [0.1, 0.3, 0.5, 0.7, 0.9], default=[0.3, 0.5, 0.7])
         grid = [{"alpha": a, "l1_ratio": l} for a in alphas for l in l1s]
 
     elif model_name == "LightGBM":
-        nes = st.multiselect(
-            "N Estimators",
-            [100, 200, 400, 800],
-            default=[200, 400],
-        )
-
-        leaves = st.multiselect(
-            "Num Leaves",
-            [15, 31, 63, 127],
-            default=[31, 63],
-        )
-
-        lrs = st.multiselect(
-            "Learning Rate",
-            [0.01, 0.05, 0.1],
-            default=[0.05, 0.1],
-        )
-
-        grid = [
-            {
-                "n_estimators": n,
-                "num_leaves": lv,
-                "learning_rate": lr,
-            }
-            for n in nes
-            for lv in leaves
-            for lr in lrs
-        ]
+        nes = st.multiselect("N Estimators", [100, 200, 400, 800], default=[200, 400])
+        leaves = st.multiselect("Num Leaves", [15, 31, 63, 127], default=[31, 63])
+        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1], default=[0.05, 0.1])
+        grid = [{"n_estimators": n, "num_leaves": lv, "learning_rate": lr} for n in nes for lv in leaves for lr in lrs]
 
     elif model_name == "Decision Tree":
-        depths = st.multiselect(
-            "Max Depth",
-            [2, 3, 5, 7, 10, 15, None],
-            default=[3, 5, 10],
-        )
-
-        mins = st.multiselect(
-            "Min Samples Split",
-            [2, 5, 10, 20],
-            default=[2, 5, 10],
-        )
-
+        depths = st.multiselect("Max Depth", [2, 3, 5, 7, 10, 15, None], default=[3, 5, 10])
+        mins = st.multiselect("Min Samples Split", [2, 5, 10, 20], default=[2, 5, 10])
         grid = [{"max_depth": d, "min_samples_split": s} for d in depths for s in mins]
 
     elif model_name == "Random Forest":
-        nes = st.multiselect(
-            "N Estimators",
-            [50, 100, 200, 300],
-            default=[50, 100, 200],
-        )
-
-        deps = st.multiselect(
-            "Max Depth",
-            [5, 10, 15, None],
-            default=[5, 10, 15],
-        )
-
+        nes = st.multiselect("N Estimators", [50, 100, 200, 300], default=[50, 100, 200])
+        deps = st.multiselect("Max Depth", [5, 10, 15, None], default=[5, 10, 15])
         grid = [{"n_estimators": n, "max_depth": d} for n in nes for d in deps]
 
     else:
-        lrs = st.multiselect(
-            "Learning Rate",
-            [0.01, 0.05, 0.1, 0.2],
-            default=[0.01, 0.1],
-        )
-
-        nes = st.multiselect(
-            "N Estimators",
-            [50, 100, 200],
-            default=[50, 100],
-        )
-
-        deps = st.multiselect(
-            "Max Depth",
-            [3, 5, 7],
-            default=[3, 5],
-        )
-
-        grid = [
-            {
-                "learning_rate": lr,
-                "n_estimators": n,
-                "max_depth": d,
-            }
-            for lr in lrs
-            for n in nes
-            for d in deps
-        ]
+        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1, 0.2], default=[0.01, 0.1])
+        nes = st.multiselect("N Estimators", [50, 100, 200], default=[50, 100])
+        deps = st.multiselect("Max Depth", [3, 5, 7], default=[3, 5])
+        grid = [{"learning_rate": lr, "n_estimators": n, "max_depth": d} for lr in lrs for n in nes for d in deps]
 
     st.caption(f"Total experiments: **{len(grid)}**")
 
     st.markdown("---")
     st.markdown("### Weights & Biases Logging")
-
-    use_wb = st.checkbox(
-        "Log experiments to W&B",
-        False,
-        help="Track every grid-search run in your Weights & Biases dashboard for later comparison.",
-    )
-    wb_proj = "Manhattan-heritage-property-analysis-app"
+    use_wb = st.checkbox("Log experiments to W&B", False)
+    wb_proj = "manhattan-heritage-pricing"
     wb_entity = ""
     wb_key = ""
 
     if use_wb:
         wc1, wc2 = st.columns(2)
-
         with wc1:
-            wb_proj = st.text_input("Project name", "Manhattan-heritage-property-analysis-app")
-
+            wb_proj = st.text_input("Project name", "manhattan-heritage-pricing")
         with wc2:
             wb_entity = st.text_input("Entity / team optional", "")
-
-        wb_key = st.text_input(
-            "API key optional",
-            "",
-            type="password",
-            help="Leave empty if you already ran wandb login.",
-        )
+        wb_key = st.text_input("API key optional", "", type="password", help="Leave empty if you already ran wandb login.")
 
     st.markdown("---")
-
     if st.button("Run Tuning", type="primary"):
         if not grid:
             st.error("Configure at least one hyperparameter combination.")
             return
 
-        Xtr, Xte, ytr, yte = train_test_split(
-            X,
-            y,
-            test_size=test_sz,
-            random_state=42,
-        )
+        Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_sz, random_state=42)
 
         sc = StandardScaler()
         Xtr_s = sc.fit_transform(Xtr)
         Xte_s = sc.transform(Xte)
 
-        needs_scale = model_name in [
-            "Ridge Regression",
-            "Lasso Regression",
-            "Elastic Net",
-        ]
+        needs_scale = model_name in ["Ridge Regression", "Lasso Regression", "Elastic Net"]
 
         wb_ok = False
         wandb_mod = None
-
         if use_wb:
             try:
                 import wandb as wandb_mod
@@ -2138,14 +1901,10 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
                     wandb_mod.login(key=wb_key.strip(), relogin=True)
 
                 api_key_present = bool(wandb_mod.api.api_key)
-
                 if not api_key_present:
-                    st.error(
-                        "W&B has no API key in this session. Run wandb login or paste your key."
-                    )
+                    st.error("W&B has no API key in this session. Run wandb login or paste your key.")
                 else:
                     wb_ok = True
-
             except ImportError:
                 st.warning("wandb not installed. Logging locally only.")
             except Exception as e:
@@ -2153,16 +1912,13 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
 
         def short_tag(p):
             bits = []
-
             for k, v in p.items():
                 if v is None:
                     v = "auto"
-
                 if isinstance(v, float):
                     bits.append(f"{k[:3]}{v:g}")
                 else:
                     bits.append(f"{k[:3]}{v}")
-
             return "_".join(bits)
 
         ts = pd.Timestamp.utcnow().strftime("%m%d-%H%M")
@@ -2188,12 +1944,7 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
             elif model_name == "Gradient Boosting":
                 m = GradientBoostingRegressor(**params, random_state=42)
             else:
-                m = lgb.LGBMRegressor(
-                    **params,
-                    random_state=42,
-                    n_jobs=-1,
-                    verbose=-1,
-                )
+                m = lgb.LGBMRegressor(**params, random_state=42, n_jobs=-1, verbose=-1)
 
             if needs_scale:
                 m.fit(Xtr_s, ytr)
@@ -2213,7 +1964,6 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
                 "mae_dollars": mean_absolute_error(actual_dollars, pred_dollars),
                 "rmse_dollars": np.sqrt(mean_squared_error(actual_dollars, pred_dollars)),
             }
-
             results.append({**params, **metrics})
 
             if wb_ok:
@@ -2223,65 +1973,40 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
                         name=f"{model_slug}_{short_tag(params)}_{ts}",
                         group=model_name,
                         tags=[model_slug, "heritage-features", "log-target"],
-                        config={
-                            "model": model_name,
-                            "test_size": test_sz,
-                            **params,
-                        },
+                        config={"model": model_name, "test_size": test_sz, **params},
                         reinit=True,
                     )
-
                     if wb_entity.strip():
                         init_kwargs["entity"] = wb_entity.strip()
 
                     run = wandb_mod.init(**init_kwargs)
                     run.log(metrics)
                     run.finish()
-
                 except Exception as e:
                     wb_errors += 1
-
                     if wb_errors <= 2:
                         st.warning(f"W&B logging failed for run {i}: {e}")
 
         prog.empty()
 
         res_df = pd.DataFrame(results).sort_values("r2_test", ascending=False)
-
         st.markdown("### Results")
-        st.caption(
-            "Sorted by Test R² (best on top). "
-            "Blue cell = best test score, green = lowest dollar error."
-        )
-
-        nice = {
-            "r2_train": "R² (Train)",
-            "r2_test": "R² (Test)",
-            "mae_dollars": "MAE ($)",
-            "rmse_dollars": "RMSE ($)",
-        }
-        display_df = res_df.rename(columns=nice)
-
         st.dataframe(
-            display_df.style
-            .highlight_max(subset=["R² (Test)"], color="#667eea")
-            .highlight_min(subset=["RMSE ($)", "MAE ($)"], color="#2ecc71")
-            .format({
-                "R² (Train)": "{:.4f}",
-                "R² (Test)": "{:.4f}",
-                "MAE ($)": "${:,.0f}",
-                "RMSE ($)": "${:,.0f}",
-            }),
+            res_df.style.highlight_max(subset=["r2_test"], color="#667eea")
+            .highlight_min(subset=["rmse_dollars", "mae_dollars"], color="#2ecc71")
+            .format(
+                {
+                    "r2_train": "{:.4f}",
+                    "r2_test": "{:.4f}",
+                    "mae_dollars": "${:,.0f}",
+                    "rmse_dollars": "${:,.0f}",
+                }
+            ),
             use_container_width=True,
         )
 
         best = res_df.iloc[0]
-
-        pcols = [
-            c for c in res_df.columns
-            if c not in ["r2_train", "r2_test", "mae_dollars", "rmse_dollars"]
-        ]
-
+        pcols = [c for c in res_df.columns if c not in ["r2_train", "r2_test", "mae_dollars", "rmse_dollars"]]
         st.success(
             f"Best: R² = {best['r2_test']:.4f}, "
             f"MAE = ${best['mae_dollars']:,.0f}, "
@@ -2292,7 +2017,6 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
         if pcols:
             p0 = pcols[0]
             is_num = pd.api.types.is_numeric_dtype(res_df[p0])
-
             if is_num:
                 fig = px.line(
                     res_df.sort_values(p0),
@@ -2311,7 +2035,6 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
                     template=T["plotly"],
                     title=f"R² vs {p0}",
                 )
-
             st.plotly_chart(fig, use_container_width=True)
 
         fig2 = px.scatter(
@@ -2323,16 +2046,7 @@ The goal is to find a stronger version of the heritage-enhanced prediction model
             template=T["plotly"],
             title="Train vs Test R²",
         )
-
-        fig2.add_shape(
-            type="line",
-            x0=0,
-            x1=1,
-            y0=0,
-            y1=1,
-            line=dict(dash="dash", color="gray"),
-        )
-
+        fig2.add_shape(type="line", x0=0, x1=1, y0=0, y1=1, line=dict(dash="dash", color="gray"))
         st.plotly_chart(fig2, use_container_width=True)
 
         if wb_ok and use_wb:
@@ -2350,32 +2064,13 @@ def get_valuation_models():
     X_a = mdf[FALL].values
     y = mdf["log_price"].values
 
-    Xb_tr, _, y_tr, _ = train_test_split(
-        X_b,
-        y,
-        test_size=0.2,
-        random_state=42,
-    )
+    train_idx, _ = train_test_split(np.arange(len(mdf)), test_size=0.2, random_state=42)
 
-    Xa_tr, _, _, _ = train_test_split(
-        X_a,
-        y,
-        test_size=0.2,
-        random_state=42,
-    )
+    Xb_tr, y_tr = X_b[train_idx], y[train_idx]
+    Xa_tr = X_a[train_idx]
 
-    mb = GradientBoostingRegressor(
-        n_estimators=200,
-        max_depth=5,
-        random_state=42,
-    ).fit(Xb_tr, y_tr)
-
-    mh = GradientBoostingRegressor(
-        n_estimators=200,
-        max_depth=5,
-        random_state=42,
-    ).fit(Xa_tr, y_tr)
-
+    mb = GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42).fit(Xb_tr, y_tr)
+    mh = GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42).fit(Xa_tr, y_tr)
     return mb, mh, Xa_tr
 
 
@@ -2386,16 +2081,11 @@ def get_quantile_models():
 
     X_a = mdf[FALL].values
     y = mdf["log_price"].values
+    train_idx, _ = train_test_split(np.arange(len(mdf)), test_size=0.2, random_state=42)
 
-    Xa_tr, _, y_tr, _ = train_test_split(
-        X_a,
-        y,
-        test_size=0.2,
-        random_state=42,
-    )
+    Xa_tr, y_tr = X_a[train_idx], y[train_idx]
 
     out = {}
-
     for q in (0.1, 0.5, 0.9):
         m = lgb.LGBMRegressor(
             objective="quantile",
@@ -2407,9 +2097,7 @@ def get_quantile_models():
             n_jobs=-1,
             verbose=-1,
         ).fit(Xa_tr, y_tr)
-
         out[q] = m
-
     return out
 
 
@@ -2420,42 +2108,31 @@ def page6():
     )
 
     with st.spinner("Warming up valuation models..."):
-        mb, mh, bg_ref = get_valuation_models()
+        mb, mh, _ = get_valuation_models()
 
     pool = mdf.dropna(subset=FALL).copy()
 
     st.markdown("### Find a property")
-
     c1, c2, c3 = st.columns([2, 1, 1])
-
     with c1:
-        query = st.text_input(
-            "Search address, building name, or architect",
-            "",
-        ).strip().lower()
-
+        query = st.text_input("Search address, building name, or style", "").strip().lower()
     with c2:
         only_landmarks = st.checkbox("Landmarks only", False)
-
     with c3:
         in_hd = st.checkbox("Historic district only", False)
 
     subset = pool.copy()
-
     if only_landmarks:
         subset = subset[subset["is_landmark"] == 1]
-
     if in_hd:
         subset = subset[subset["in_historic_district"] == 1]
-
     if query:
-        m = (
+        mask = (
             subset["address"].astype(str).str.lower().str.contains(query, na=False)
             | subset["building_name"].astype(str).str.lower().str.contains(query, na=False)
-            | subset["architect"].astype(str).str.lower().str.contains(query, na=False)
+            | subset["style_primary"].astype(str).str.lower().str.contains(query, na=False)
         )
-
-        subset = subset[m]
+        subset = subset[mask]
 
     subset = subset.sort_values("sale_price", ascending=False)
 
@@ -2468,15 +2145,10 @@ def page6():
     def label(i):
         r = subset.loc[i]
         nm = r.get("display_name") or r.get("address", "Unknown")
-        arch = r["architect"] if pd.notna(r.get("architect")) else "Unknown architect"
-        return f"{nm} · {arch} · ${r['sale_price']:,.0f}"
+        style = r["style_primary"] if pd.notna(r.get("style_primary")) and str(r["style_primary"]).strip() else "Unknown style"
+        return f"{nm} · {style} · ${r['sale_price']:,.0f}"
 
-    pick_idx = st.selectbox(
-        "Pick a property",
-        subset.index[:200].tolist(),
-        format_func=label,
-    )
-
+    pick_idx = st.selectbox("Pick a property", subset.index[:200].tolist(), format_func=label)
     row = subset.loc[pick_idx]
 
     x_base = row[FB].values.reshape(1, -1).astype(float)
@@ -2487,67 +2159,44 @@ def page6():
     actual = float(row["sale_price"])
 
     heritage_adjustment = pred_her - pred_base
-    heritage_adjustment_pct = (
-        heritage_adjustment / pred_base * 100 if pred_base else 0
-    )
-
+    heritage_adjustment_pct = heritage_adjustment / pred_base * 100 if pred_base else 0
     gap = actual - pred_her
     gap_pct = gap / pred_her * 100 if pred_her else 0
 
     st.markdown("---")
-
     adjustment_color = T["accent"] if heritage_adjustment >= 0 else "#ef4444"
 
     cols = st.columns(4)
-
     cols[0].markdown(
-        f'<div class="card"><p class="val">${actual:,.0f}</p>'
-        f'<p class="lbl">Actual sale price</p></div>',
+        f'<div class="card"><p class="val">${actual:,.0f}</p><p class="lbl">Actual sale price</p></div>',
         unsafe_allow_html=True,
     )
-
     cols[1].markdown(
-        f'<div class="card"><p class="val">${pred_base:,.0f}</p>'
-        f'<p class="lbl">Baseline prediction</p></div>',
+        f'<div class="card"><p class="val">${pred_base:,.0f}</p><p class="lbl">Baseline prediction</p></div>',
         unsafe_allow_html=True,
     )
-
     cols[2].markdown(
-        f'<div class="card"><p class="val">${pred_her:,.0f}</p>'
-        f'<p class="lbl">Heritage-enhanced prediction</p></div>',
+        f'<div class="card"><p class="val">${pred_her:,.0f}</p><p class="lbl">Heritage-enhanced prediction</p></div>',
         unsafe_allow_html=True,
     )
-
     cols[3].markdown(
-        f'<div class="card"><p class="val" style="color:{adjustment_color}">'
-        f'{heritage_adjustment:+,.0f}</p>'
+        f'<div class="card"><p class="val" style="color:{adjustment_color}">{heritage_adjustment:+,.0f}</p>'
         f'<p class="lbl">Heritage feature adjustment ({heritage_adjustment_pct:+.1f}%)</p></div>',
         unsafe_allow_html=True,
     )
 
     if abs(gap_pct) < 10:
-        st.success(
-            f"Actual price is close to the heritage-enhanced prediction "
-            f"({gap_pct:+.1f}%)."
-        )
+        st.success(f"Actual price is close to the heritage-enhanced prediction ({gap_pct:+.1f}%).")
     elif gap_pct > 0:
-        st.info(
-            f"Actual sale price is **above** the heritage-enhanced prediction by "
-            f"{gap_pct:+.1f}% (${abs(gap):,.0f})."
-        )
+        st.info(f"Actual sale price is **above** the heritage-enhanced prediction by {gap_pct:+.1f}% (${abs(gap):,.0f}).")
     else:
-        st.warning(
-            f"Actual sale price is **below** the heritage-enhanced prediction by "
-            f"{gap_pct:+.1f}% (${abs(gap):,.0f})."
-        )
+        st.warning(f"Actual sale price is **below** the heritage-enhanced prediction by {gap_pct:+.1f}% (${abs(gap):,.0f}).")
 
     qm = get_quantile_models()
-
     if qm is not None:
         q_low = float(np.expm1(qm[0.1].predict(x_all)[0]))
         q_med = float(np.expm1(qm[0.5].predict(x_all)[0]))
         q_high = float(np.expm1(qm[0.9].predict(x_all)[0]))
-
         inside = q_low <= actual <= q_high
 
         st.markdown("---")
@@ -2557,73 +2206,60 @@ def page6():
         actual_color = "#10b981" if inside else "#ef4444"
 
         fig = go.Figure()
-
-        fig.add_trace(go.Scatter(
-            x=[q_low, q_high],
-            y=[0, 0],
-            mode="lines",
-            line=dict(color=T["accent"], width=18),
-            opacity=0.35,
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=[q_low, q_high],
-            y=[0, 0],
-            mode="markers+text",
-            marker=dict(size=10, color=T["accent"]),
-            text=[
-                f"P10<br>${q_low:,.0f}",
-                f"P90<br>${q_high:,.0f}",
-            ],
-            textposition=["top left", "top right"],
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=[q_med],
-            y=[0],
-            mode="markers+text",
-            marker=dict(size=20, color=T["accent"], line=dict(color="white", width=2)),
-            text=[f"Model median<br>${q_med:,.0f}"],
-            textposition="bottom center",
-            name="Median",
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=[actual],
-            y=[0],
-            mode="markers+text",
-            marker=dict(
-                size=22,
-                color=actual_color,
-                symbol="diamond",
-                line=dict(color="white", width=2),
-            ),
-            text=[f"Actual<br>${actual:,.0f}"],
-            textposition="bottom center",
-            name="Actual",
-        ))
-
+        fig.add_trace(
+            go.Scatter(
+                x=[q_low, q_high],
+                y=[0, 0],
+                mode="lines",
+                line=dict(color=T["accent"], width=18),
+                opacity=0.35,
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[q_low, q_high],
+                y=[0, 0],
+                mode="markers+text",
+                marker=dict(size=10, color=T["accent"]),
+                text=[f"P10<br>${q_low:,.0f}", f"P90<br>${q_high:,.0f}"],
+                textposition=["top left", "top right"],
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[q_med],
+                y=[0],
+                mode="markers+text",
+                marker=dict(size=20, color=T["accent"], line=dict(color="white", width=2)),
+                text=[f"Model median<br>${q_med:,.0f}"],
+                textposition="bottom center",
+                name="Median",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[actual],
+                y=[0],
+                mode="markers+text",
+                marker=dict(size=22, color=actual_color, symbol="diamond", line=dict(color="white", width=2)),
+                text=[f"Actual<br>${actual:,.0f}"],
+                textposition="bottom center",
+                name="Actual",
+            )
+        )
         pad = max(q_high - q_low, 1) * 0.15
-
         fig.update_layout(
             template=T["plotly"],
             height=230,
-            xaxis=dict(
-                tickformat="$,.0f",
-                range=[
-                    min(q_low, actual) - pad,
-                    max(q_high, actual) + pad,
-                ],
-            ),
+            xaxis=dict(tickformat="$,.0f", range=[min(q_low, actual) - pad, max(q_high, actual) + pad]),
             yaxis=dict(visible=False, range=[-1, 1]),
             margin=dict(l=20, r=20, t=40, b=20),
             showlegend=False,
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
         if inside:
@@ -2634,23 +2270,13 @@ def page6():
             st.caption(f"Actual price is below the P10 by ${q_low - actual:,.0f}.")
 
     bname = str(row.get("building_name") or "").strip()
-    arch = str(row.get("architect") or "").strip()
-
     wiki = None
-
     if bname and bname.lower() not in ("0", "none", "nan"):
         wiki = wiki_lookup(bname)
-
-    if (not wiki or not wiki.get("image")) and arch and arch.lower() not in ("unknown", "0", "nan"):
-        arch_wiki = wiki_lookup(arch)
-
-        if arch_wiki and arch_wiki.get("image"):
-            wiki = arch_wiki
 
     if wiki and (wiki.get("image") or wiki.get("extract")):
         st.markdown("---")
         st.markdown("### Heritage Spotlight")
-
         wc1, wc2 = st.columns([1, 2])
 
         with wc1:
@@ -2661,7 +2287,6 @@ def page6():
 
         with wc2:
             st.markdown(f"**{wiki['title']}** · [Open on Wikipedia ↗]({wiki['url']})")
-
             if wiki.get("extract"):
                 st.markdown(
                     f"<p style='color:{T['muted']};line-height:1.55;'>{wiki['extract']}</p>",
@@ -2670,7 +2295,6 @@ def page6():
 
     st.markdown("---")
     st.markdown("### Building Profile")
-
     pc1, pc2 = st.columns([1, 1])
 
     with pc1:
@@ -2688,7 +2312,6 @@ def page6():
         info = [
             ("Address", fmt(row.get("address"))),
             ("Building name", fmt(row.get("building_name"))),
-            ("Architect", fmt(row.get("architect"))),
             ("Style", fmt(row.get("style_primary"))),
             ("Facade material", fmt(row.get("material_primary"))),
             ("Era", fmt(row.get("construction_era"))),
@@ -2698,22 +2321,10 @@ def page6():
             ("Neighborhood", fmt(row.get("neighborhood"))),
             ("Landmark", "Yes" if row.get("is_landmark") == 1 else "No"),
             ("Historic district", "Yes" if row.get("in_historic_district") == 1 else "No"),
-            (
-                "Altered since",
-                fmt(row.get("alteration_year"), "year")
-                if row.get("is_altered") == 1
-                else "Original",
-            ),
+            ("Altered since", fmt(row.get("alteration_year"), "year") if row.get("is_altered") == 1 else "Original"),
         ]
-
         info_df = pd.DataFrame(info, columns=["Field", "Value"])
-
-        st.dataframe(
-            info_df,
-            use_container_width=True,
-            hide_index=True,
-            height=480,
-        )
+        st.dataframe(info_df, use_container_width=True, hide_index=True, height=480)
 
     with pc2:
         near = pool[
@@ -2729,34 +2340,27 @@ def page6():
             color_discrete_sequence=[T["muted"]],
             hover_name="display_name",
             zoom=14.5,
-            center={
-                "lat": row["latitude"],
-                "lon": row["longitude"],
-            },
+            center={"lat": row["latitude"], "lon": row["longitude"]},
             height=480,
             template=T["plotly"],
         )
-
-        fig.add_trace(go.Scattermapbox(
-            lat=[row["latitude"]],
-            lon=[row["longitude"]],
-            mode="markers",
-            marker=dict(size=24, color=T["accent"]),
-            hovertext=[row.get("display_name", "This property")],
-            name="Selected",
-            showlegend=False,
-        ))
-
-        fig.update_layout(
-            mapbox_style=T["map_style"],
-            margin={"r": 0, "t": 0, "l": 0, "b": 0},
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=[row["latitude"]],
+                lon=[row["longitude"]],
+                mode="markers",
+                marker=dict(size=24, color=T["accent"]),
+                hovertext=[row.get("display_name", "This property")],
+                name="Selected",
+                showlegend=False,
+            )
         )
-
+        fig.update_layout(mapbox_style=T["map_style"], margin={"r": 0, "t": 0, "l": 0, "b": 0})
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
     st.markdown("### Why This Price? Feature Contributions")
-    st.caption("This explains how different features push the heritage-enhanced prediction up or down.")
+    st.caption("This explains how the selected heritage variables and baseline variables push the prediction up or down.")
 
     try:
         import shap
@@ -2765,7 +2369,6 @@ def page6():
             explainer = shap.TreeExplainer(mh)
             sv = explainer.shap_values(x_all)
             ev = explainer.expected_value
-
             if hasattr(ev, "__len__"):
                 ev = ev[0]
 
@@ -2779,12 +2382,10 @@ def page6():
         fig_w, _ = plt.subplots(figsize=(11, 6))
         shap.waterfall_plot(explanation, show=False, max_display=12)
         plt.tight_layout()
-
         st.pyplot(fig_w)
         plt.close()
 
         base_dollars = float(np.expm1(ev))
-
         st.caption(
             f"Model baseline for a typical property: approximately ${base_dollars:,.0f}. "
             f"Feature contributions move the prediction to ${pred_her:,.0f}."
