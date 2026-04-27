@@ -1044,7 +1044,13 @@ def page2():
             extruded=True,
         )
 
-        view = pdk.ViewState(latitude=40.754, longitude=-73.987, zoom=12.2, pitch=50, bearing=20)
+        view = pdk.ViewState(
+            latitude=40.754,
+            longitude=-73.987,
+            zoom=12.2,
+            pitch=50,
+            bearing=20,
+        )
 
         tooltip = {
             "html": (
@@ -1159,6 +1165,7 @@ def page2():
                 template=T["plotly"],
             )
             st.plotly_chart(fig, use_container_width=True)
+
         with c2:
             fig = px.histogram(
                 viz.dropna(subset=["price_per_sqft"]),
@@ -1189,6 +1196,7 @@ def page2():
 
         st.markdown("---")
         st.markdown("### Price by Historic District")
+
         hd = viz[viz["historic_district"].astype(str).str.len() > 0]
         fig = px.box(
             hd,
@@ -1228,6 +1236,7 @@ def page2():
 
         st.markdown("---")
         c1, c2 = st.columns(2)
+
         with c1:
             st.markdown("#### Facade Material")
             mp = (
@@ -1318,6 +1327,7 @@ def page2():
 
         st.markdown("---")
         c1, c2 = st.columns(2)
+
         with c1:
             st.markdown("#### Building Age vs Sale Price")
             fig = px.scatter(
@@ -1347,41 +1357,119 @@ def page2():
 
         st.markdown("---")
         st.markdown("### Correlation Matrix")
-        corr_cols = [
+        st.caption(
+            "Choose which variables to include. "
+            "The selectable list includes the numeric variables from the baseline model, "
+            "the heritage model, and a few useful extras like sale price and price per square foot."
+        )
+
+        corr_candidates = [
             "sale_price",
             "price_per_sqft",
-            "building_age",
-            "num_floors",
             "gross_sqft",
+            "land_sqft",
+            "num_floors",
+            "lot_area",
+            "lot_depth",
+            "lot_frontage",
+            "building_depth",
+            "building_frontage",
+            "residential_units",
+            "commercial_units",
+            "total_units",
             "assess_total",
-            "is_altered",
-            "in_historic_district",
+            "assess_land",
+            "exempt_total",
+            "built_far",
+            "resid_far",
+            "comm_far",
+            "facil_far",
+            "sale_month",
+            "zoning_encoded",
+            "building_class_code_encoded",
+            "building_age",
+            "construction_era_encoded",
+            "architect_encoded",
             "is_landmark",
+            "in_historic_district",
+            "is_altered",
+            "years_since_alteration",
+            "material_primary_encoded",
+            "style_primary_encoded",
         ]
-        ac = [c for c in corr_cols if c in viz.columns]
-        cm = viz[ac].corr()
-        mask = np.triu(np.ones_like(cm, dtype=bool))
 
-        fig_c, ax = plt.subplots(figsize=(11, 8))
-        sns.heatmap(
-            cm,
-            mask=mask,
-            annot=True,
-            fmt=".2f",
-            cmap="RdBu_r",
-            center=0,
-            square=True,
-            linewidths=0.5,
-            ax=ax,
-            vmin=-1,
-            vmax=1,
+        available_corr_cols = [
+            c for c in corr_candidates
+            if c in viz.columns and pd.api.types.is_numeric_dtype(viz[c])
+        ]
+
+        default_corr_cols = [
+            c for c in [
+                "sale_price",
+                "price_per_sqft",
+                "gross_sqft",
+                "land_sqft",
+                "num_floors",
+                "assess_total",
+                "building_age",
+                "construction_era_encoded",
+                "architect_encoded",
+                "is_landmark",
+                "in_historic_district",
+                "is_altered",
+                "years_since_alteration",
+                "material_primary_encoded",
+                "style_primary_encoded",
+                "zoning_encoded",
+                "building_class_code_encoded",
+            ]
+            if c in available_corr_cols
+        ]
+
+        selected_corr_cols = st.multiselect(
+            "Variables to include",
+            options=available_corr_cols,
+            default=default_corr_cols,
+            format_func=flabel,
+            key="corr_var_selector",
         )
-        ax.set_title("Feature Correlation Matrix")
-        plt.tight_layout()
-        st.pyplot(fig_c)
-        plt.close()
 
+        if len(selected_corr_cols) < 2:
+            st.warning("Please select at least 2 variables.")
+        else:
+            cm = viz[selected_corr_cols].corr()
+            mask = np.triu(np.ones_like(cm, dtype=bool))
 
+            fig_height = max(8, min(18, len(selected_corr_cols) * 0.45))
+            fig_width = max(10, min(20, len(selected_corr_cols) * 0.55))
+
+            fig_c, ax = plt.subplots(figsize=(fig_width, fig_height))
+            sns.heatmap(
+                cm,
+                mask=mask,
+                annot=True,
+                fmt=".2f",
+                cmap="RdBu_r",
+                center=0,
+                square=True,
+                linewidths=0.5,
+                ax=ax,
+                vmin=-1,
+                vmax=1,
+                cbar_kws={"shrink": 0.8},
+            )
+            ax.set_title("Selected Variable Correlation Matrix")
+            plt.xticks(rotation=45, ha="right")
+            plt.yticks(rotation=0)
+            plt.tight_layout()
+            st.pyplot(fig_c)
+            plt.close()
+
+            st.caption(
+                "Note: encoded categorical variables such as architect, style, material, "
+                "construction era, zoning, and building class are included for exploration, "
+                "but their correlations should be interpreted more cautiously than continuous variables."
+            )
 # =================================================================
 # PAGE 3. PREDICTION MODELS
 # =================================================================
