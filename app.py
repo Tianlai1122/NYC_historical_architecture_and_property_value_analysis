@@ -875,14 +875,82 @@ However, several columns were **engineered** from raw fields, such as binary lan
     with tab2:
         st.dataframe(variable_dictionary_df("Heritage"), use_container_width=True, height=460)
 
-    st.markdown("---")
+       st.markdown("---")
     st.markdown("### Data Preview")
-    st.caption("This preview now shows only the target and the variables used by the model-ready dataset.")
+    st.caption("This preview shows the target and the human-readable versions of the model variables. Encoded columns are used in modeling, but not displayed here.")
 
-    preview_cols = ["sale_price"] + FALL
+    preview_cols = [
+        "sale_price",
+        "gross_sqft",
+        "land_sqft",
+        "num_floors",
+        "lot_area",
+        "lot_depth",
+        "lot_frontage",
+        "building_depth",
+        "building_frontage",
+        "residential_units",
+        "commercial_units",
+        "total_units",
+        "assess_total",
+        "assess_land",
+        "exempt_total",
+        "built_far",
+        "resid_far",
+        "comm_far",
+        "facil_far",
+        "zoning",                  # instead of zoning_encoded
+        "building_class_code",     # instead of building_class_code_encoded
+        "sale_month",
+        "building_age",
+        "construction_era",        # instead of construction_era_encoded
+        "architect",               # instead of architect_encoded
+        "is_landmark",
+        "in_historic_district",
+        "is_altered",
+        "years_since_alteration",
+        "material_primary",        # instead of material_primary_encoded
+        "style_primary",           # instead of style_primary_encoded
+    ]
+
     preview_cols = [c for c in preview_cols if c in mdf.columns]
     preview_df = mdf[preview_cols].head(20).copy()
-    preview_df.columns = [flabel(c) if c != "sale_price" else "Sale Price" for c in preview_df.columns]
+
+    preview_rename = {
+        "sale_price": "Sale Price",
+        "gross_sqft": "Gross Floor Area",
+        "land_sqft": "Lot Size",
+        "num_floors": "Number of Floors",
+        "lot_area": "Lot Area",
+        "lot_depth": "Lot Depth",
+        "lot_frontage": "Lot Frontage",
+        "building_depth": "Building Depth",
+        "building_frontage": "Building Frontage",
+        "residential_units": "Residential Units",
+        "commercial_units": "Commercial Units",
+        "total_units": "Total Units",
+        "assess_total": "Total Assessment Value",
+        "assess_land": "Land Assessment Value",
+        "exempt_total": "Tax Exemption Amount",
+        "built_far": "Built FAR",
+        "resid_far": "Residential FAR Cap",
+        "comm_far": "Commercial FAR Cap",
+        "facil_far": "Facility FAR Cap",
+        "zoning": "Zoning District",
+        "building_class_code": "Building Class",
+        "sale_month": "Sale Month",
+        "building_age": "Building Age",
+        "construction_era": "Construction Era",
+        "architect": "Architect",
+        "is_landmark": "Individual Landmark",
+        "in_historic_district": "In Historic District",
+        "is_altered": "Has Been Altered",
+        "years_since_alteration": "Years Since Alteration",
+        "material_primary": "Primary Facade Material",
+        "style_primary": "Primary Architectural Style",
+    }
+
+    preview_df = preview_df.rename(columns=preview_rename)
     st.dataframe(preview_df, use_container_width=True, height=380)
 
     st.markdown("---")
