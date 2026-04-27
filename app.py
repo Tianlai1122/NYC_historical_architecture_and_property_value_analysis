@@ -1357,119 +1357,167 @@ def page2():
 
         st.markdown("---")
         st.markdown("### Correlation Matrix")
-        st.caption(
-            "Choose which variables to include. "
-            "The selectable list includes the numeric variables from the baseline model, "
-            "the heritage model, and a few useful extras like sale price and price per square foot."
-        )
 
-        corr_candidates = [
-            "sale_price",
-            "price_per_sqft",
-            "gross_sqft",
-            "land_sqft",
-            "num_floors",
-            "lot_area",
-            "lot_depth",
-            "lot_frontage",
-            "building_depth",
-            "building_frontage",
-            "residential_units",
-            "commercial_units",
-            "total_units",
-            "assess_total",
-            "assess_land",
-            "exempt_total",
-            "built_far",
-            "resid_far",
-            "comm_far",
-            "facil_far",
-            "sale_month",
-            "zoning_encoded",
-            "building_class_code_encoded",
-            "building_age",
-            "construction_era_encoded",
-            "architect_encoded",
-            "is_landmark",
-            "in_historic_district",
-            "is_altered",
-            "years_since_alteration",
-            "material_primary_encoded",
-            "style_primary_encoded",
-        ]
+        left_col, right_col = st.columns([3, 1.35])
 
-        available_corr_cols = [
-            c for c in corr_candidates
-            if c in viz.columns and pd.api.types.is_numeric_dtype(viz[c])
-        ]
+        with right_col:
+            st.markdown("#### How to read this")
+            st.markdown(
+                """
+This matrix is meant for **continuous numeric variables first**.
 
-        default_corr_cols = [
-            c for c in [
+So by default, it focuses on variables such as:
+
+- sale price
+- square footage
+- lot dimensions
+- assessments
+- FAR
+- building age
+- years since alteration
+
+**Binary variables** like landmark status and historic district status, and **encoded categorical variables** like architect, style, material, zoning, and building class are **not shown by default**.
+
+Why:
+- binary variables may have very little variation in the current filtered sample
+- encoded variables are labels, not true continuous numbers
+- Pearson correlation is more interpretable for continuous variables
+
+You can still include them by turning on the option below, but interpret those results more cautiously.
+"""
+            )
+
+        with left_col:
+            st.caption(
+                "Choose which variables to include. Default selections prioritize continuous numeric variables. "
+                "Variables with no variation in the current sample are removed automatically."
+            )
+
+            continuous_corr_candidates = [
                 "sale_price",
                 "price_per_sqft",
                 "gross_sqft",
                 "land_sqft",
                 "num_floors",
+                "lot_area",
+                "lot_depth",
+                "lot_frontage",
+                "building_depth",
+                "building_frontage",
+                "residential_units",
+                "commercial_units",
+                "total_units",
                 "assess_total",
+                "assess_land",
+                "exempt_total",
+                "built_far",
+                "resid_far",
+                "comm_far",
+                "facil_far",
                 "building_age",
+                "years_since_alteration",
+                "sale_month",
+            ]
+
+            encoded_binary_candidates = [
+                "zoning_encoded",
+                "building_class_code_encoded",
                 "construction_era_encoded",
                 "architect_encoded",
+                "material_primary_encoded",
+                "style_primary_encoded",
                 "is_landmark",
                 "in_historic_district",
                 "is_altered",
-                "years_since_alteration",
-                "material_primary_encoded",
-                "style_primary_encoded",
-                "zoning_encoded",
-                "building_class_code_encoded",
             ]
-            if c in available_corr_cols
-        ]
 
-        selected_corr_cols = st.multiselect(
-            "Variables to include",
-            options=available_corr_cols,
-            default=default_corr_cols,
-            format_func=flabel,
-            key="corr_var_selector",
-        )
-
-        if len(selected_corr_cols) < 2:
-            st.warning("Please select at least 2 variables.")
-        else:
-            cm = viz[selected_corr_cols].corr()
-            mask = np.triu(np.ones_like(cm, dtype=bool))
-
-            fig_height = max(8, min(18, len(selected_corr_cols) * 0.45))
-            fig_width = max(10, min(20, len(selected_corr_cols) * 0.55))
-
-            fig_c, ax = plt.subplots(figsize=(fig_width, fig_height))
-            sns.heatmap(
-                cm,
-                mask=mask,
-                annot=True,
-                fmt=".2f",
-                cmap="RdBu_r",
-                center=0,
-                square=True,
-                linewidths=0.5,
-                ax=ax,
-                vmin=-1,
-                vmax=1,
-                cbar_kws={"shrink": 0.8},
+            include_encoded_binary = st.checkbox(
+                "Include encoded / binary variables",
+                value=False,
+                key="include_encoded_binary_corr",
             )
-            ax.set_title("Selected Variable Correlation Matrix")
-            plt.xticks(rotation=45, ha="right")
-            plt.yticks(rotation=0)
-            plt.tight_layout()
-            st.pyplot(fig_c)
-            plt.close()
 
-            st.caption(
-                "Note: encoded categorical variables such as architect, style, material, "
-                "construction era, zoning, and building class are included for exploration, "
-                "but their correlations should be interpreted more cautiously than continuous variables."
+            corr_candidates = continuous_corr_candidates.copy()
+            if include_encoded_binary:
+                corr_candidates += encoded_binary_candidates
+
+            available_corr_cols = [
+                c for c in corr_candidates
+                if c in viz.columns and pd.api.types.is_numeric_dtype(viz[c])
+            ]
+
+            default_corr_cols = [
+                c for c in [
+                    "sale_price",
+                    "price_per_sqft",
+                    "gross_sqft",
+                    "land_sqft",
+                    "num_floors",
+                    "lot_area",
+                    "assess_total",
+                    "assess_land",
+                    "built_far",
+                    "building_age",
+                    "years_since_alteration",
+                    "sale_month",
+                ]
+                if c in available_corr_cols
+            ]
+
+            selected_corr_cols = st.multiselect(
+                "Variables to include",
+                options=available_corr_cols,
+                default=default_corr_cols,
+                format_func=flabel,
+                key="corr_var_selector",
             )
+
+            if len(selected_corr_cols) < 2:
+                st.warning("Please select at least 2 variables.")
+            else:
+                valid_corr_cols = [
+                    c for c in selected_corr_cols
+                    if viz[c].nunique(dropna=True) > 1
+                ]
+
+                removed_cols = [c for c in selected_corr_cols if c not in valid_corr_cols]
+
+                if len(valid_corr_cols) < 2:
+                    st.warning("Not enough variables with variation in the current sample to compute correlations.")
+                else:
+                    if removed_cols:
+                        st.info(
+                            "Removed from the matrix because they have no variation in the current filtered sample: "
+                            + ", ".join([flabel(c) for c in removed_cols])
+                        )
+
+                    cm = viz[valid_corr_cols].corr()
+                    mask = np.triu(np.ones_like(cm, dtype=bool))
+
+                    fig_height = max(8, min(18, len(valid_corr_cols) * 0.48))
+                    fig_width = max(10, min(20, len(valid_corr_cols) * 0.58))
+
+                    fig_c, ax = plt.subplots(figsize=(fig_width, fig_height))
+                    sns.heatmap(
+                        cm,
+                        mask=mask,
+                        annot=True,
+                        fmt=".2f",
+                        cmap="RdBu_r",
+                        center=0,
+                        square=True,
+                        linewidths=0.5,
+                        ax=ax,
+                        vmin=-1,
+                        vmax=1,
+                        cbar_kws={"shrink": 0.8},
+                    )
+                    ax.set_title("Selected Variable Correlation Matrix")
+                    plt.xticks(rotation=45, ha="right")
+                    plt.yticks(rotation=0)
+                    plt.tight_layout()
+                    st.pyplot(fig_c)
+                    plt.close()
 # =================================================================
 # PAGE 3. PREDICTION MODELS
 # =================================================================
