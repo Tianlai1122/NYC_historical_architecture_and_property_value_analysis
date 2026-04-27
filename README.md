@@ -26,22 +26,22 @@ The short answer turned out to be more interesting than expected — the heritag
 |---|---|---|
 | 1 | **Business Case & Data** | Research question, data merge strategy, dataset preview, summary KPIs. |
 | 2 | **Visualizations & Maps** | 3D pydeck property map, era / style / material price comparisons, **Architect Value Leaderboard** with heritage premium ranking, **Era → Style → Price Tier Sankey**, correlation heatmap. |
-| 3 | **Prediction Models** | Up to 9 regression models trained side-by-side on Baseline vs Heritage feature sets. Live mini-leaderboard, Manhattan trivia carousel during training, **residual map** + top 10 over/under-priced properties. |
+| 3 | **Prediction Models** | Up to 8 regression models trained side-by-side on Baseline vs Heritage feature sets. Live mini-leaderboard, Manhattan trivia carousel during training, **residual map** + top 10 over/under-priced properties. |
 | 4 | **Feature Importance** | Per-model importance bar charts, full SHAP summary plot, individual SHAP waterfall for any test sample. Friendly column names throughout. |
 | 5 | **Hyperparameter Tuning** | Grid search across configurable parameter ranges. Optional Weights & Biases integration with in-app API-key input. |
-| 6 | **Property Valuator** *(extra)* | Pick any property, see Baseline vs Heritage predictions, 80% confidence interval via LightGBM quantile regression, SHAP waterfall, and a Wikipedia card pulling photos for famous buildings. |
+| 6 | **Property Valuator** *(extra)* | Pick any property, see Baseline vs Heritage predictions, 80% confidence interval via quantile Gradient Boosting, SHAP waterfall, and a Wikipedia card pulling photos for famous buildings. |
 
 ---
 
-## Models (up to 9 total)
+## Models (up to 8 total)
 
 | Family | Models |
 |---|---|
 | Linear | Linear Regression, Ridge, Lasso, Elastic Net |
 | Tree | Decision Tree, Random Forest |
-| Gradient Boosting | sklearn Gradient Boosting, **LightGBM**, **CatBoost** |
+| Gradient Boosting | sklearn Gradient Boosting, **CatBoost** |
 
-Best test R² on log-price (full feature set, 80/20 split): **LightGBM 0.618 / CatBoost 0.616**.
+Best test R² on log-price is typically achieved by the tree ensemble models, especially **CatBoost**, Random Forest, and sklearn Gradient Boosting depending on the selected split.
 
 ---
 
@@ -103,7 +103,7 @@ For the in-class 8-minute presentation, use [PRESENTATION_GUIDE.md](PRESENTATION
 
 - **App framework:** Streamlit (multi-page sidebar navigation, glassy custom CSS)
 - **Visualization:** Plotly (interactive charts, Sankey, mapbox-free maps), pydeck (3D ColumnLayer), Matplotlib + Seaborn
-- **ML:** scikit-learn, LightGBM (regular + quantile), CatBoost
+- **ML:** scikit-learn, CatBoost
 - **Explainability:** SHAP (TreeExplainer + LinearExplainer, summary plot + waterfall)
 - **Experiment tracking:** Weights & Biases (optional)
 - **External data:** Wikipedia API (auto-fetches building photos and intros for the Property Valuator)
@@ -116,7 +116,7 @@ For the in-class 8-minute presentation, use [PRESENTATION_GUIDE.md](PRESENTATION
 ├── app.py                              # Streamlit application (6 pages)
 ├── prepare_data.py                     # Data merge & feature engineering pipeline
 ├── Manhattan_Heritage_Analysis.csv     # Final merged dataset (2,864 rows × 62 cols)
-├── requirements.txt                    # Python dependencies (incl. lightgbm, catboost)
+├── requirements.txt                    # Python dependencies (incl. catboost)
 ├── README.md                           # This file
 ├── FINDINGS.md                         # Analytical insights & talking points
 ├── PRESENTATION_GUIDE.md               # 8-minute presentation plan and model explanations

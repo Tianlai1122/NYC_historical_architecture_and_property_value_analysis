@@ -29,12 +29,6 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.tree import DecisionTreeRegressor
 
 try:
-    import lightgbm as lgb
-    HAS_LGBM = True
-except ImportError:
-    HAS_LGBM = False
-
-try:
     from catboost import CatBoostRegressor
     HAS_CATBOOST = True
 except ImportError:
@@ -1587,19 +1581,6 @@ Performance is shown with **R²** and dollar-scale error metrics.
         ),
     }
 
-    if HAS_LGBM:
-        MODELS["LightGBM"] = (
-            lgb.LGBMRegressor(
-                n_estimators=150,
-                num_leaves=31,
-                learning_rate=0.08,
-                random_state=rs,
-                n_jobs=-1,
-                verbose=-1,
-            ),
-            False,
-        )
-
     if HAS_CATBOOST:
         MODELS["CatBoost"] = (
             CatBoostRegressor(
@@ -2055,9 +2036,6 @@ This page tries different combinations and compares their performance on the her
         "Random Forest",
         "Gradient Boosting",
     ]
-    if HAS_LGBM:
-        tune_choices.append("LightGBM")
-
     c1, c2 = st.columns(2)
     with c1:
         model_name = st.selectbox("Model", tune_choices)
@@ -2080,12 +2058,6 @@ This page tries different combinations and compares their performance on the her
         alphas = st.multiselect("Alpha", [0.001, 0.01, 0.05, 0.1, 0.5, 1.0], default=[0.01, 0.05, 0.1])
         l1s = st.multiselect("L1 ratio", [0.1, 0.3, 0.5, 0.7, 0.9], default=[0.3, 0.5, 0.7])
         grid = [{"alpha": a, "l1_ratio": l} for a in alphas for l in l1s]
-
-    elif model_name == "LightGBM":
-        nes = st.multiselect("N Estimators", [100, 200, 400, 800], default=[200, 400])
-        leaves = st.multiselect("Num Leaves", [15, 31, 63, 127], default=[31, 63])
-        lrs = st.multiselect("Learning Rate", [0.01, 0.05, 0.1], default=[0.05, 0.1])
-        grid = [{"n_estimators": n, "num_leaves": lv, "learning_rate": lr} for n in nes for lv in leaves for lr in lrs]
 
     elif model_name == "Decision Tree":
         depths = st.multiselect("Max Depth", [2, 3, 5, 7, 10, 15, None], default=[3, 5, 10])
@@ -2184,10 +2156,8 @@ This page tries different combinations and compares their performance on the her
                 m = DecisionTreeRegressor(**params, random_state=42)
             elif model_name == "Random Forest":
                 m = RandomForestRegressor(**params, random_state=42, n_jobs=-1)
-            elif model_name == "Gradient Boosting":
-                m = GradientBoostingRegressor(**params, random_state=42)
             else:
-                m = lgb.LGBMRegressor(**params, random_state=42, n_jobs=-1, verbose=-1)
+                m = GradientBoostingRegressor(**params, random_state=42)
 
             if needs_scale:
                 m.fit(Xtr_s, ytr)
@@ -2319,9 +2289,6 @@ def get_valuation_models():
 
 @st.cache_resource
 def get_quantile_models():
-    if not HAS_LGBM:
-        return None
-
     X_a = mdf[FALL].values
     y = mdf["log_price"].values
     train_idx, _ = train_test_split(np.arange(len(mdf)), test_size=0.2, random_state=42)
@@ -2330,15 +2297,13 @@ def get_quantile_models():
 
     out = {}
     for q in (0.1, 0.5, 0.9):
-        m = lgb.LGBMRegressor(
-            objective="quantile",
+        m = GradientBoostingRegressor(
+            loss="quantile",
             alpha=q,
-            n_estimators=400,
-            num_leaves=31,
+            n_estimators=120,
+            max_depth=3,
             learning_rate=0.05,
             random_state=42,
-            n_jobs=-1,
-            verbose=-1,
         ).fit(Xa_tr, y_tr)
         out[q] = m
     return out
