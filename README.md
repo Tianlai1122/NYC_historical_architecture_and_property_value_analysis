@@ -16,7 +16,7 @@ A Streamlit app that asks a single question:
 
 Most real-estate pricing models stop at structural features (square footage, lot size, floors). We add **architect prestige, construction era, facade material, architectural style, landmark status, and historic-district membership**, then measure whether those features contribute to sale price on top of the baseline.
 
-The short answer turned out to be more interesting than expected — the heritage premium exists but is largely already baked into the city's tax assessment. Full analytical write-up: [FINDINGS.md](FINDINGS.md).
+The short answer turned out to be more interesting than expected — the heritage premium exists but is largely already baked into the city's tax assessment. Full analytical write-up: [FINDINGS.md](FINDINGS.md). Presentation talking points: [PRESENTATION_GUIDE.md](PRESENTATION_GUIDE.md).
 
 ---
 
@@ -26,14 +26,14 @@ The short answer turned out to be more interesting than expected — the heritag
 |---|---|---|
 | 1 | **Business Case & Data** | Research question, data merge strategy, dataset preview, summary KPIs. |
 | 2 | **Visualizations & Maps** | 3D pydeck property map, era / style / material price comparisons, **Architect Value Leaderboard** with heritage premium ranking, **Era → Style → Price Tier Sankey**, correlation heatmap. |
-| 3 | **Prediction Models** | 8 regression models trained side-by-side on Baseline vs Heritage feature sets. Live mini-leaderboard, Manhattan trivia carousel during training, **residual map** + top 10 over/under-priced properties. |
+| 3 | **Prediction Models** | Up to 9 regression models trained side-by-side on Baseline vs Heritage feature sets. Live mini-leaderboard, Manhattan trivia carousel during training, **residual map** + top 10 over/under-priced properties. |
 | 4 | **Feature Importance** | Per-model importance bar charts, full SHAP summary plot, individual SHAP waterfall for any test sample. Friendly column names throughout. |
 | 5 | **Hyperparameter Tuning** | Grid search across configurable parameter ranges. Optional Weights & Biases integration with in-app API-key input. |
 | 6 | **Property Valuator** *(extra)* | Pick any property, see Baseline vs Heritage predictions, 80% confidence interval via LightGBM quantile regression, SHAP waterfall, and a Wikipedia card pulling photos for famous buildings. |
 
 ---
 
-## Models (8 total)
+## Models (up to 9 total)
 
 | Family | Models |
 |---|---|
@@ -55,7 +55,7 @@ Three NYC open datasets merged on **BBL (Borough-Block-Lot)**:
 | **NYC Citywide Rolling Calendar Sales** | [NYC OpenData](https://data.cityofnewyork.us/dataset/NYC-Citywide-Rolling-Calendar-Sales/usep-8jbt/about_data) | Sale prices, sale dates, building class, and other transactional data |
 | **Individual Landmark and Historic District Building Database** | [NYC OpenData](https://data.cityofnewyork.us/Housing-Development/Individual-Landmark-and-Historic-District-Building/7mgd-s57w) / [Data.gov](https://catalog.data.gov/dataset/individual-landmark-and-historic-district-building-database) | Architect, architectural style, primary facade material, landmark designation, historic district membership, and alteration history |
 
-After merging on BBL and filtering for sales ≥ $100K: **2,864 properties × 62 columns**.
+After merging on BBL: **2,864 properties × 62 columns**. For modeling, the app filters out non-market transactions below $100K, leaving **2,834 model-ready transactions** before feature completeness checks.
 
 ### Engineered features
 
@@ -95,6 +95,8 @@ Page 5 supports W&B experiment tracking. Either:
 
 Project name on W&B: `Manhattan-heritage-property-analysis-app`.
 
+For the in-class 8-minute presentation, use [PRESENTATION_GUIDE.md](PRESENTATION_GUIDE.md) for the final conclusion, speaker split, chart explanations, and model-by-model interpretation.
+
 ---
 
 ## Tech Stack
@@ -117,6 +119,7 @@ Project name on W&B: `Manhattan-heritage-property-analysis-app`.
 ├── requirements.txt                    # Python dependencies (incl. lightgbm, catboost)
 ├── README.md                           # This file
 ├── FINDINGS.md                         # Analytical insights & talking points
+├── PRESENTATION_GUIDE.md               # 8-minute presentation plan and model explanations
 └── .gitignore                          # Excludes large source CSVs
 ```
 
