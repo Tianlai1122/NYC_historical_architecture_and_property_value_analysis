@@ -875,7 +875,7 @@ However, several columns were **engineered** from raw fields, such as binary lan
     with tab2:
         st.dataframe(variable_dictionary_df("Heritage"), use_container_width=True, height=460)
 
-       st.markdown("---")
+    st.markdown("---")
     st.markdown("### Data Preview")
     st.caption("This preview shows the target and the human-readable versions of the model variables. Encoded columns are used in modeling, but not displayed here.")
 
@@ -899,18 +899,18 @@ However, several columns were **engineered** from raw fields, such as binary lan
         "resid_far",
         "comm_far",
         "facil_far",
-        "zoning",                  # instead of zoning_encoded
-        "building_class_code",     # instead of building_class_code_encoded
+        "zoning",
+        "building_class_code",
         "sale_month",
         "building_age",
-        "construction_era",        # instead of construction_era_encoded
-        "architect",               # instead of architect_encoded
+        "construction_era",
+        "architect",
         "is_landmark",
         "in_historic_district",
         "is_altered",
         "years_since_alteration",
-        "material_primary",        # instead of material_primary_encoded
-        "style_primary",           # instead of style_primary_encoded
+        "material_primary",
+        "style_primary",
     ]
 
     preview_cols = [c for c in preview_cols if c in mdf.columns]
@@ -966,8 +966,6 @@ However, several columns were **engineered** from raw fields, such as binary lan
     with mv2:
         st.markdown(f"**Rows:** {len(mdf):,}  |  **Columns:** {len(mdf.columns)}")
         st.dataframe(dataset_missing_info(mdf), use_container_width=True, height=420)
-
-
 # =================================================================
 # PAGE 2. VISUALIZATIONS & MAPS
 # =================================================================
