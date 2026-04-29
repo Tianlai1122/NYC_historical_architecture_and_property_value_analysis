@@ -1532,13 +1532,139 @@ def page3():
         """
 This page directly tests the research question.
 
-- **Baseline model** = standard real-estate variables only  
+- **Baseline model** = standard real-estate variables only
 - **Heritage-enhanced model** = baseline variables + selected heritage variables, including architect
 
-The target is **log-transformed sale price**.  
+The target is **log-transformed sale price**.
 Performance is shown with **R²** and dollar-scale error metrics.
 """
     )
+
+    # ─────────────────────────────────────────────────────────────
+    # DESIGN EVOLUTION — how our feature set evolved
+    # ─────────────────────────────────────────────────────────────
+    with st.expander("📜 Our Design Journey — How the feature set evolved", expanded=False):
+        st.markdown(
+            """
+We did **not** arrive at the current feature set in one shot.
+The story below is the most important methodological finding of the project.
+"""
+        )
+
+        ev_c1, ev_c2 = st.columns(2)
+
+        with ev_c1:
+            st.markdown("##### Phase 1 — Naive Baseline (11 features)")
+            st.markdown(
+                """
+`gross_sqft`, `lot_size`, `num_floors`, `year_built`,
+`residential_units`, `commercial_units`, `total_units`,
+`bldg_class`, `borough`, `zoning_code`, `council_district`
+"""
+            )
+            st.markdown(
+                """
+**Results**
+- Linear R² ≈ **0.12**
+- Random Forest R² ≈ **0.50**
+- CatBoost R² ≈ **0.53**
+
+**Heritage uplift = +5% to +8%** → looked like a huge win.
+"""
+            )
+
+        with ev_c2:
+            st.markdown("##### Phase 2 — Expanded Baseline (21 features)")
+            st.markdown(
+                """
+Added the variables every professional valuation uses:
+
+`assess_total` ← **the game changer**, `assess_land`,
+`exempt_total`, `land_area`, `bldg_area`,
+`comm_far`, `resid_far`, `built_far`,
+`sale_month`, `year_alter1`
+"""
+            )
+            st.markdown(
+                """
+**Results**
+- Linear R²: 0.12 → **0.19** (+58% relative)
+- Random Forest R²: 0.50 → **0.59** (+18%)
+- CatBoost R²: 0.53 → **0.61** (+15%)
+
+**Heritage uplift collapsed to +0.65%.**
+"""
+            )
+
+        # Chart: baseline R² before vs after expansion
+        evo_df = pd.DataFrame({
+            "Model": ["Linear", "Random Forest", "CatBoost"],
+            "Phase 1 baseline (11 feats)": [0.12, 0.50, 0.53],
+            "Phase 2 baseline (21 feats)": [0.19, 0.59, 0.61],
+        })
+
+        fig_evo = go.Figure()
+        fig_evo.add_trace(go.Bar(
+            name="Phase 1 — 11 features",
+            x=evo_df["Model"],
+            y=evo_df["Phase 1 baseline (11 feats)"],
+            marker_color="#94a3b8",
+            text=[f"{v:.2f}" for v in evo_df["Phase 1 baseline (11 feats)"]],
+            textposition="outside",
+        ))
+        fig_evo.add_trace(go.Bar(
+            name="Phase 2 — 21 features (+ assess_total)",
+            x=evo_df["Model"],
+            y=evo_df["Phase 2 baseline (21 feats)"],
+            marker_color=T["accent"],
+            text=[f"{v:.2f}" for v in evo_df["Phase 2 baseline (21 feats)"]],
+            textposition="outside",
+        ))
+        fig_evo.update_layout(
+            template=T["plotly"],
+            barmode="group",
+            height=340,
+            margin=dict(l=10, r=10, t=50, b=10),
+            yaxis_title="R² (test)",
+            yaxis=dict(range=[0, 0.75]),
+            title=dict(text="Baseline R² jumped after adding assess_total + FAR + sale_month",
+                       x=0.02, font=dict(size=14)),
+            legend=dict(orientation="h", y=-0.18),
+        )
+        st.plotly_chart(fig_evo, use_container_width=True)
+
+        # Chart: heritage uplift collapse
+        uplift_df = pd.DataFrame({
+            "Stage": ["Phase 1 baseline\n(weak — 11 feats)",
+                      "Phase 2 baseline\n(strong — 21 feats)"],
+            "Heritage uplift (R²)": [0.065, 0.0065],
+        })
+        fig_up = go.Figure(go.Bar(
+            x=uplift_df["Stage"],
+            y=uplift_df["Heritage uplift (R²)"],
+            marker_color=["#94a3b8", T["accent"]],
+            text=[f"+{v*100:.2f}%" for v in uplift_df["Heritage uplift (R²)"]],
+            textposition="outside",
+        ))
+        fig_up.update_layout(
+            template=T["plotly"],
+            height=320,
+            margin=dict(l=10, r=10, t=50, b=10),
+            yaxis_title="Heritage uplift (Δ R²)",
+            yaxis=dict(range=[0, 0.085], tickformat=".1%"),
+            title=dict(text="Heritage uplift collapsed once assess_total entered the baseline",
+                       x=0.02, font=dict(size=14)),
+        )
+        st.plotly_chart(fig_up, use_container_width=True)
+
+        st.info(
+            "**Why the collapse is the key insight.** "
+            "City assessors already consider landmark status, era, style, and historic district when "
+            "they compute `assess_total` — and `assess_total` correlates with sale price at **r ≈ 0.70**. "
+            "Once that single variable is in the model, explicit heritage features add little *new* signal. "
+            "Heritage value didn't vanish; the **market had already priced it in**. "
+            "The +0.65% uplift is evidence of **market efficiency**, not of feature failure."
+        )
 
     c1, c2, c3 = st.columns(3)
     with c1:
