@@ -767,7 +767,7 @@ def page1():
         "Can architectural and preservation features make property price predictions more accurate?"
     )
 
-    st.caption("**Authors**: Tianlai Zhang, William Zheng, Haochen Zhang")
+    st.markdown("<small>**Authors**: Tianlai Zhang, William Zheng, Haochen Zhang</small>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### Research Question")
