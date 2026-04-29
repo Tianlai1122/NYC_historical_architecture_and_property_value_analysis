@@ -767,6 +767,14 @@ def page1():
         "Can architectural and preservation features make property price predictions more accurate?"
     )
 
+    # Authors section
+    col_authors = st.columns([1, 2, 1])
+    with col_authors[1]:
+        st.info(
+            "**Authors**: Tianlai Zhang, William Zheng, Haochen Zhang",
+            icon="👥"
+        )
+
     st.markdown("---")
     st.markdown("### Research Question")
     st.markdown(
