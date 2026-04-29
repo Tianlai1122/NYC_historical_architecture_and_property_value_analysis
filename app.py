@@ -770,10 +770,7 @@ def page1():
     # Authors section
     col_authors = st.columns([1, 2, 1])
     with col_authors[1]:
-        st.info(
-            "**Authors**: Tianlai Zhang, William Zheng, Haochen Zhang",
-            icon="👥"
-        )
+        st.info("**Authors**: Tianlai Zhang, William Zheng, Haochen Zhang")
 
     st.markdown("---")
     st.markdown("### Research Question")
