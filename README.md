@@ -11,6 +11,8 @@ pinned: false
 
 # NYC Historical Architecture & Property Value Analysis
 
+**Authors**: Tianlai Zhang, William Zheng, Haochen Zhang
+
 A Streamlit app that asks a single question:
 > **Does a building's architectural heritage create measurable market value in Manhattan?**
 

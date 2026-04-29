@@ -2,6 +2,11 @@
 Manhattan Heritage Property Valuation
 Predicting Manhattan Property Sale Prices with Architectural Heritage Features
 
+Authors:
+- Tianlai Zhang
+- William Zheng
+- Haochen Zhang
+
 Central Question:
 Can heritage-related variables improve the prediction of Manhattan property sale prices?
 """
